@@ -1,108 +1,196 @@
-#include <vector>
+#include <algorithm>
 #include <bitset>
 #include <forward_list>
+#include <functional>
 #include <iostream>
-using namespace std;
+#include <unordered_set>
+#include <vector>
+
+#include "datagen.h"
+#include "murmur/MurmurHash3.h"
 
 class simple_bit_set {
-    private:
-    static const int pageSize = 32;
-    typedef std::bitset<pageSize> page;
-    std::vector<page> data;
-    public:
-    simple_bit_set(const int size): 
-        data((size/pageSize)+1, 0) {}
-    bool test(unsigned int i) const {
-        return data[(i / pageSize)].test(i % pageSize);
-    }
-    void set(unsigned int i) {
-        data[(i / pageSize)].set(i % pageSize);
-    }
+private:
+  static const int pageSize = 32;
+  typedef std::bitset<pageSize> page;
+  std::vector<page> data;
 
-    // The following are diagnostics stuff
-    void clear() { data.clear(); }
-    int count() const {
-        int sum = 0;
-        for (auto&& p : data) {
-            sum += p.count();
-        }
-        return sum;
+public:
+  simple_bit_set(const int size) : data((size / pageSize) + 1, 0) {}
+  bool test(unsigned int i) const {
+    return data[(i / pageSize)].test(i % pageSize);
+  }
+  void set(unsigned int i) { data[(i / pageSize)].set(i % pageSize); }
+
+  void clear() { data.clear(); }
+  int count() const {
+    int sum = 0;
+    for (auto &&p : data) {
+      sum += p.count();
     }
-    int size() const {
-        return data.size()*pageSize;
+    return sum;
+  }
+  int size() const { return data.size() * pageSize; }
+  std::string to_string() const {
+    std::string r;
+    for (auto &&p : data) {
+      r += p.to_string();
     }
+    return r;
+  }
+};
+
+template <class V, size_t K> class hash_scheme {
+  using hashfunc_t = std::function<size_t(const V &)>;
+  std::array<hashfunc_t, K> hashers;
+
+public:
+  hash_scheme() {
+    for (size_t i = 0; i < K; i++) {
+      hashers[i] = [i](const V &v) {
+        uint32_t res;
+        MurmurHash3_x86_32(v.c_str(), v.size(), i, &res);
+        return static_cast<size_t>(res);
+      };
+    }
+  }
+  std::vector<size_t> operator()(const V &v) const {
+    std::vector<size_t> res(K);
+    for (size_t i = 0; i < K; i++) {
+      res[i] = hashers[i](v);
+    }
+    return res;
+  }
 };
 
 // Takes a value, and a hashing function for it.
 // The question remains about how to have multiple hash values...
-template<class V, class H>
-class bloom_filter {
-    private:
-    simple_bit_set data;
-    std::forward_list<H> hashes;
-    public:
-    // also pass in some container of hash functions?
-    bloom_filter(const int size, const std::forward_list<H> hashes):
-        data(size), hashes(hashes) {}
-    void set(const V& v) {
-        for (auto&& h : hashes) {
-            data.set(h(v));
-        }
+template <class V, size_t K> class bloom_filter {
+public:
+  simple_bit_set data;
+  size_t size;
+  hash_scheme<V, K> hash;
+
+public:
+  // also pass in some container of hash functions?
+  bloom_filter(const size_t size) : data(size), size(size) {}
+  void set(const V &v) {
+    auto hashes = hash(v);
+    for (auto &&b : hashes) {
+      data.set(b % size);
     }
-    bool test(const V& v) const {
-        for (auto&& h : hashes) {
-            if (!data.test(h(v))) {
-                return false;
-            }
-        }
-        return true;
+  }
+  bool test(const V &v) const {
+    auto hashes = hash(v);
+    for (auto &&b : hashes) {
+      if (!data.test(b % size)) {
+        return false;
+      }
     }
+    return true;
+  }
+  std::string to_string() const { return data.to_string(); }
+  size_t count() const { return data.count(); }
 };
 
-using namespace std;
+template <class V, size_t K> class bloom_filtered_set {
+  std::unordered_set<V> core_data;
 
-#include <string>
-#include <fstream>
-#include <iostream>
-#include <algorithm>
-#include <utility>
-#include <functional>
+public:
+  bloom_filter<V, K> filter;
 
-using namespace std;
-int ipow(int x, int y) {
-    auto res = x;
-    for (int i = 0; i < y; ++i) {
-        res *= x;
+  bloom_filtered_set(size_t size) : filter(size) {}
+
+  void add(V &v) {
+    filter.set(v);
+    core_data.insert(v);
+  }
+  bool contains(V &v) const {
+    if (!filter.test(v)) {
+      return false;
     }
-    return res;
+    return core_data.find(v) != core_data.end();
+  }
+};
+
+const double ln2 = 0.693147181;
+
+void experiment1() {
+  std::unordered_set<std::string> unique_strings;
+  string_generator g;
+  while (unique_strings.size() < 1100000) {
+    unique_strings.insert(g(10));
+  }
+  std::vector<std::string> data(std::begin(unique_strings),
+                                std::end(unique_strings));
+
+  // m = number of bits (bloom filter size)
+  // n = number of elements (in this case, 1,000,000)
+  // k = number of hashes
+  // from wiki, optimal k = (m/n)ln2.
+  // so optimal m = (k*n)/ln2
+  auto to_add_begin = std::begin(data);
+  auto to_add_end = to_add_begin + 1000000;
+  auto to_test_begin = to_add_end;
+  auto to_test_end = std::end(data);
+
+  const auto n = std::distance(to_add_begin, to_add_end);
+  const auto k = 7;
+  std::cout << "n = " << n << std::endl;
+  std::cout << "k = " << k << std::endl;
+  std::cout << "m = " << (k * n) / ln2 << std::endl;
+  size_t m = size_t((k * n) / ln2);
+  std::cout << "m = " << m << std::endl;
+
+  bloom_filter<std::string, k> bf(m);
+  std::for_each(to_add_begin, to_add_end, [&bf](auto &v) { bf.set(v); });
+
+  auto false_positives = std::count_if(to_test_begin, to_test_end,
+                                       [&bf](auto &v) { return bf.test(v); });
+  std::cout << "false positives = " << false_positives << std::endl;
+  double fp_rate = double(false_positives) /
+                   double(std::distance(to_test_begin, to_test_end));
+  std::cout << "false positive rate = " << fp_rate << std::endl;
+}
+void experiment2() {
+  std::unordered_set<std::string> unique_strings;
+  string_generator g;
+  while (unique_strings.size() < 1100000) {
+    unique_strings.insert(g(10));
+  }
+  std::vector<std::string> data(std::begin(unique_strings),
+                                std::end(unique_strings));
+
+  // m = number of bits (bloom filter size)
+  // n = number of elements (in this case, 1,000,000)
+  // k = number of hashes
+  // from wiki, optimal k = (m/n)ln2.
+  // so optimal m = (k*n)/ln2
+  auto to_add_begin = std::begin(data);
+  auto to_add_end = to_add_begin + 1000000;
+  auto to_test_begin = to_add_end;
+  auto to_test_end = std::end(data);
+
+  const auto n = std::distance(to_add_begin, to_add_end);
+  const double eps = 0.01;
+  const double best_bits = -1.44 * std::log2(eps);
+  size_t m = n * best_bits;
+  std::cout << "best bits = " << best_bits << std::endl;
+  std::cout << "size      = " << m << std::endl;
+  size_t k = size_t(-std::log2(eps)) + 1;
+  std::cout << "k         = " << k << std::endl;
+
+  m = 9999991; // prime?
+  bloom_filter<std::string, 7> bf(m);
+  std::for_each(to_add_begin, to_add_end, [&bf](auto &v) { bf.set(v); });
+
+  auto false_positives = std::count_if(to_test_begin, to_test_end,
+                                       [&bf](auto &v) { return bf.test(v); });
+  std::cout << "false positives = " << false_positives << std::endl;
+  double fp_rate = double(false_positives) /
+                   double(std::distance(to_test_begin, to_test_end));
+  std::cout << "false positive rate = " << fp_rate << std::endl;
+  std::cout << "density = " << bf.count() << "/" << m << std::endl;
 }
 
-// This basic one will guard a map over a set of strings.
-int main(int argc, char* argv[]) {
-    //int size = 1024*32;
-    int size = 31511; // nearby prime.
-    auto hash1 = [size](const std::string& s) {
-        return ((unsigned int) ipow(std::hash<std::string>{}(s) % size, 3)) % size;
-    };
-    auto hash2 = [size](const std::string& s) {
-        return ((unsigned int) ipow(std::hash<std::string>{}(s) % size, 5)) % size;
-    };
-    auto hash3 = [size](const std::string& s) {
-        return ((unsigned int) ipow(std::hash<std::string>{}(s) % size, 7)) % size;
-    };
-    auto hash4 = [size](const std::string& s) {
-        return ((unsigned int) ipow(std::hash<std::string>{}(s) % size, 11)) % size;
-    };
-    std::forward_list<function<unsigned int(const std::string&)>> hashes;
-    hashes.push_front(hash1);
-    hashes.push_front(hash2);
-    hashes.push_front(hash3);
-    hashes.push_front(hash4);
-    bloom_filter<std::string, function<unsigned int(const std::string&)>> bf(size, hashes);
-    bf.set("hello");
-    bf.set("goodbye");
-    bf.set("how are you");
-    for (auto&& s : {"hello", "goodbye", "how are you", "what the who now what"}) {
-        cout << s << " " << bf.test(s) << endl;
-    }
-}
+int main(int argc, char *argv[]) { experiment2(); }
