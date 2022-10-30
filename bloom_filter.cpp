@@ -21,8 +21,6 @@ public:
     return data[(i / pageSize)].test(i % pageSize);
   }
   void set(unsigned int i) { data[(i / pageSize)].set(i % pageSize); }
-
-  void clear() { data.clear(); }
   int count() const {
     int sum = 0;
     for (auto &&p : data) {
@@ -40,24 +38,17 @@ public:
   }
 };
 
-template <class V, size_t K> class hash_scheme {
-  using hashfunc_t = std::function<size_t(const V &)>;
-  std::array<hashfunc_t, K> hashers;
+template <class V> class hash_scheme {
+  size_t k;
 
 public:
-  hash_scheme() {
-    for (size_t i = 0; i < K; i++) {
-      hashers[i] = [i](const V &v) {
-        uint32_t res;
-        MurmurHash3_x86_32(v.c_str(), v.size(), i, &res);
-        return static_cast<size_t>(res);
-      };
-    }
-  }
+  hash_scheme(size_t k) : k(k) {}
   std::vector<size_t> operator()(const V &v) const {
-    std::vector<size_t> res(K);
-    for (size_t i = 0; i < K; i++) {
-      res[i] = hashers[i](v);
+    std::vector<size_t> res(k);
+    for (size_t i = 0; i < k; i++) {
+      uint32_t hash;
+      MurmurHash3_x86_32(v.c_str(), v.size(), i, &hash);
+      res[i] = static_cast<size_t>(hash);
     }
     return res;
   }
@@ -65,15 +56,16 @@ public:
 
 // Takes a value, and a hashing function for it.
 // The question remains about how to have multiple hash values...
-template <class V, size_t K> class bloom_filter {
+template <class V> class bloom_filter {
 public:
   simple_bit_set data;
   size_t size;
-  hash_scheme<V, K> hash;
+  hash_scheme<V> hash;
 
 public:
   // also pass in some container of hash functions?
-  bloom_filter(const size_t size) : data(size), size(size) {}
+  bloom_filter(const size_t size, const size_t k)
+      : data(size), size(size), hash(k) {}
   void set(const V &v) {
     auto hashes = hash(v);
     for (auto &&b : hashes) {
@@ -91,15 +83,18 @@ public:
   }
   std::string to_string() const { return data.to_string(); }
   size_t count() const { return data.count(); }
+  double density() const {
+    return static_cast<double>(count()) / static_cast<double>(size);
+  }
 };
 
 template <class V, size_t K> class bloom_filtered_set {
   std::unordered_set<V> core_data;
 
 public:
-  bloom_filter<V, K> filter;
+  bloom_filter<V> filter;
 
-  bloom_filtered_set(size_t size) : filter(size) {}
+  bloom_filtered_set(size_t size, size_t k) : filter(size, k) {}
 
   void add(V &v) {
     filter.set(v);
@@ -142,7 +137,7 @@ void experiment1() {
   size_t m = size_t((k * n) / ln2);
   std::cout << "m = " << m << std::endl;
 
-  bloom_filter<std::string, k> bf(m);
+  bloom_filter<std::string> bf(m, k);
   std::for_each(to_add_begin, to_add_end, [&bf](auto &v) { bf.set(v); });
 
   auto false_positives = std::count_if(to_test_begin, to_test_end,
@@ -172,7 +167,7 @@ void experiment2() {
   auto to_test_end = std::end(data);
 
   const auto n = std::distance(to_add_begin, to_add_end);
-  const double eps = 0.01;
+  const double eps = 0.2;
   const double best_bits = -1.44 * std::log2(eps);
   size_t m = n * best_bits;
   std::cout << "best bits = " << best_bits << std::endl;
@@ -180,8 +175,9 @@ void experiment2() {
   size_t k = size_t(-std::log2(eps)) + 1;
   std::cout << "k         = " << k << std::endl;
 
-  m = 9999991; // prime?
-  bloom_filter<std::string, 7> bf(m);
+  // m = 9,999,991; // prime?
+  // m = 10000000; // prime?
+  bloom_filter<std::string> bf(m, k);
   std::for_each(to_add_begin, to_add_end, [&bf](auto &v) { bf.set(v); });
 
   auto false_positives = std::count_if(to_test_begin, to_test_end,
@@ -190,7 +186,7 @@ void experiment2() {
   double fp_rate = double(false_positives) /
                    double(std::distance(to_test_begin, to_test_end));
   std::cout << "false positive rate = " << fp_rate << std::endl;
-  std::cout << "density = " << bf.count() << "/" << m << std::endl;
+  std::cout << "density = " << bf.density() << std::endl;
 }
 
 int main(int argc, char *argv[]) { experiment2(); }
