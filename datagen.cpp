@@ -1,6 +1,7 @@
 #include <iostream>
 #include <random>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "datagen.h"
@@ -29,6 +30,18 @@ std::vector<std::string> generate_strings(int len, int count) {
   }
 
   return res;
+}
+
+std::vector<std::string> seed_strings(size_t to_add, size_t to_not_add,
+                                      size_t len) {
+  std::unordered_set<std::string> unique_strings;
+  string_generator g;
+  while (unique_strings.size() < (to_add + to_not_add)) {
+    unique_strings.insert(g(len));
+  }
+  std::vector<std::string> data(std::begin(unique_strings),
+                                std::end(unique_strings));
+  return data;
 }
 
 #ifdef _DATAGEN_STANDALONE_

@@ -12,3 +12,7 @@ public:
   string_generator();
   std::string operator()(size_t len);
 };
+
+std::vector<std::string> seed_strings(size_t to_add = 1000000,
+                                      size_t to_not_add = 100000,
+                                      size_t len = 10);
