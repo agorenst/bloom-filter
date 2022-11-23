@@ -1,0 +1,278 @@
+\documentclass{article}
+\author{Aaron Gorenstein}
+\title{Bloom Filter Implementation}
+\date{\today}
+
+\usepackage{noweb}
+\usepackage{listing}
+\usepackage{minted}
+\usepackage{cleveref}
+
+\usepackage{biblatex}
+\addbibresource{library.bib}
+
+\begin{document}
+\maketitle
+\section{Introduction}
+As a data structure to explore, Bloom filters\cite{bloom1970} seem to hit the ``sweet spot'' in a number of ways.
+\begin{enumerate}
+\item They're practical, and used in industry.
+\item They have many interesting extensions, e.g., 
+\item They are amenable to analysis, and indeed are literally a textbook example of some probabilistic technique-applications\cite{mitzenmacher2005probability}.
+\end{enumerate}
+Moreover, as we'll see, they \emph{readily} translate from an abstract, analysis-focused description
+to a (serviceable) real-world example.
+
+Most educational treatments of Bloom filters naturally focus on the mathematical analysis of their properties.
+Here we'll try to bridge the gap between theoretical treatments of Bloom filters and how they're realized in code.
+I would expect in this case, as in other topics, there is a still-further jump from a demonstrative implementation (as we'll develop here) and an ``industrial-strength'' one,
+so this is not the end of the story
+
+Theoretical treatments typically present their code with psuedocode, which is understandable: it makes it easier to focus on the qualities that dictate the formal analysis.
+The gap we will try to jump is not ``just'' psuedocode.
+Motivation for any data structure or algorithm comes from its applications, and I have personally seen most treatments be content with a few prose sentences.
+This is to those treatments' detriments, in my opinion.
+Seeing a full, running example of (in this case) how a Bloom filter can be used to speed up set membership tests, that helped build
+conceptual ``hooks'' in my mind on which I could attach the more fundamental concepts of them.
+I will say more about this as we get there in \cref{sec:application}.
+
+The rest of this document will follow this structure:
+\begin{itemize}
+\item In \cref{sec:theorytocode} we'll present our demonstrative C++ implementation of a bloom filter.
+The one implementation detail we will \emph{not} drill into is the hashing scheme; we need a collection $h_i$ of hash fucntions,
+and we'll do so using MurmurHash3.
+\item In \cref{sec:application} we'll build a Bloom-filter-enhanced container in C++, and list out some expectations of what we'd if the Bloom filter helps us as we'd want.
+\item In OTHER SECTION we'll \emph{apply} the analytical results
+\end{itemize}
+List out each section and what we'll get out of them.
+One thing intentionally missing from this treatment is an introductory description of what a Bloom filter \emph{is}.
+For that I can only recommend online resources or books\cite{mitzenmacher2005probability}.
+
+% ++++++++++++++++++++++++
+% 
+% Bloom filters seem to hit just the ``sweet spot'' for interesting data structures.
+% They were introduced decades ago\cite{bloom1970}, and are a practical data structure, still in use today.
+% They are interesting: they are a probabilistic data structure, and exhibit a curious behavior (false-positives) that mean they only have certain applications.
+% Their expected performance is amenable to analysis, but not trivial (at least for me).
+% They are extensible; a great many variaties exist.
+% Lastly, they are simple, in the sense that they can be easily implemented, and consequently explored empirically.
+% 
+% It is all of these, but especially the last part on implementation, that motivates this work.
+% Here we will implement, using only standard C++, a basic Bloom filter. This includes:
+% \begin{enumerate}
+% \item Its core implementation and helper objects
+% \item Experiments validating its behavior as predicted by mathematical analysis
+% \item Experiments validating its expected benefit in a demonstrative application
+% \end{enumerate}
+% What we will \emph{not} do is introduce what a Bloom filter is, we trust you're already familiar.
+% We will also \emph{not} include any analysis of the hashing algorithm we will use.
+% Finally, the above-mentioned experiments will also be suitably humble in scope.
+
+% The expected benefit of this work is to equip others to ``follow along'' and take the code further,
+% and moreover to show that we can---and should more often!---jump the bridge between theory and implementation.
+% Without further ado we can jump into implementing Bloom filters.
+% 
+% Let's explore how to map a general description, in this case the one from a standard textbook\cite{mitzenmacher2005probability},
+% and see how it maps to code.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Bloom Filter: Theory to Code}\label{sec:theorytocode}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+We will move from 
+As described in our reference, we want a length-$n$ sequence $A$ of bits.
+We additionally specify $k$ hash-functions.
+\subsection{Bloom Filter Implementation}
+<<Bloom filter state and construction>>=
+private:
+  simple_bit_set A;
+
+public:
+  const size_t n;
+  const size_t k;
+  bloom_filter(const size_t n, const size_t k) : b(n), n(n), k(k) {}
+@
+The field [[A]] is the core sequence of bits.
+When we talk about ``setting'' or ``checking'' bits, we are referencing [[A]].
+The parameter [[n]] is the number of bits we'll be using in our sequence.
+Finally, [[k]] is the number of bits we set for each value.
+
+As an implementation detail, the type of our container, as well as its hashing scheme,
+are passed as \emph{template} parameters.
+<<Bloom Filter C++ Type Interface>>=
+template <class V, size_t (*h)(uint32_t i, const V &)>
+@
+Given the C++ type system and its model of containers in its standard library,
+this seems like the appropriate way to specify this.
+Here already we have something of an extra hurdle from theoretical descriptions: we have to make sure our implementation plays nicely with our programming language's type system!
+
+With our parameters, and how they're set in our object, defined, we can turn to the key functionality:
+how do we add elements to our filter, and how do we test if an element was added to our filter?
+For these two operations we'll map the theoretical prose into code.
+
+\paragraph{Adding Elements}
+\begin{quote}
+For each element $s\in S$, the bits $A[h_i(s)]$ are set to 1 for $1\leq i \leq k$.
+A bit location can be set to 1 multiple times, but only the first change has an effect.
+\end{quote}
+<<Bloom filter set>>=
+void set(const V &s) {
+  for (size_t i = 0; i < k; i++) {
+    A.set(h(i, s) % n);
+  }
+}
+@
+
+\paragraph{Testing an Element}
+\begin{quote}
+To check if an element $x$ is in $S$, we check whether all array locations $A[h_i(x)]$
+for $1 \leq i \leq k$ are set to 1. If not, then clearly $x$ is not a member of $S$,\ldots.
+If all $A[h_i(x)]$ are set to 1, we assume $x$ is in $S$, although we could be wrong.
+\end{quote}
+<<Bloom filter test>>=
+bool test(const V &s) const {
+  for (size_t i = 0; i < k; i++) {
+    if (!A.test(h(i, s) % n)) {
+      return false;
+    }
+  }
+  return true;
+}
+@
+
+\paragraph{Tying it together}
+This completes the core of our implementation.
+We can wrap these up in a stand-alone C++ header defining this object, like so:
+<<bloomfilter.h>>=
+<<Bloom Filter C++ Type Interface>>
+class bloom_filter {
+  <<Bloom filter state and construction>>
+  <<Bloom filter set>>
+  <<Bloom filter test>>
+};
+@
+
+We are not quite done with our implementation.
+Two things remain:
+\begin{enumerate}
+\item Implementing our array-of-bits [[simple_bit_set]]
+\item Providing concrete arguments for the template parameters [[V]] and [[h]].
+\end{enumerate}
+
+We will address these in turn.
+
+\subsection{Array of Bits}
+Some languages have this built in already.
+The language C++ has it, but not really, so we do this:
+<<simplebitset.h>>=
+class simple_bit_set {
+private:
+  static const int pageSize = 64;
+  typedef std::bitset<pageSize> page;
+  std::vector<page> data;
+
+public:
+  simple_bit_set(const int size) : data((size / pageSize) + 1, 0) {}
+  bool test(unsigned int i) const {
+    return data[(i / pageSize)].test(i % pageSize);
+  }
+  void set(unsigned int i) { data[(i / pageSize)].set(i % pageSize); }
+  int count() const {
+    return std::transform_reduce(std::begin(data), std::end(data), 0,
+                                 std::plus{},
+                                 [](auto &p) { return p.count(); });
+  }
+  int size() const { return data.size() * pageSize; }
+  std::string to_string() const { // to help with debugging
+    std::string r;
+    for (auto &&p : data) {
+      r += p.to_string();
+    }
+    return r;
+  }
+};
+@
+
+\subsection{Hashing Scheme}
+We use murmur3!
+Something I'm interested in: a nice \emph{theory} of a hashing algorithm.
+There are great empirical results that this is a good hashing algorithm.
+What explains that performance?
+
+\section{Bloom Filter Application}\label{sec:application}
+At this point, we've essentially emulated the typical introduction to a Bloom filter\cite{mitzenmacher2005probability}.
+
+
+Let's demonstrate 
+<<bloomfilterset.h>>=
+#include "bloom_filter.h"
+template <class V, size_t (*F)(const V &, uint32_t)>
+class bloom_filtered_set {
+  std::set<V> core_data;
+  bloom_filter<V, F> filter;
+
+public:
+  mutable size_t filter_hit = 0;
+
+  bloom_filtered_set(size_t size, size_t k) : filter(size, k) {}
+
+  <<Filtered Set Add>>
+  <<Filtered Set Test>>
+};
+@
+
+<<Filtered Set Add>>=
+void add(V &v) {
+  filter.set(v);
+  core_data.insert(v);
+}
+@
+
+<<Filtered Set Test>>=
+int contains(V &v) const {
+  if (!filter.test(v)) {
+    filter_hit++; // for diagnostics
+    return false;
+  }
+  return core_data.find(v) != core_data.end();
+}
+@
+
+\section{Using Analytical Results}
+Most treatments\cite{mitzenmacher2005probability,bloom1970} spend time on how to derive the analytical results.
+This document is meant to complement those by providing some empirical demonstrations.
+We will not spend time deriving the analytical results, but will instead ``just'' demonstrate how to plug in those results to use a Bloom filter effectively.
+The analytical results inform the parameters $k$ and $n$, basically.
+
+When we use a bloom filter, we care about the \emph{size} of the filter, and its \emph{false-positive} rate.
+The size is ``just'' the size of the explicit object, the same $n$ that says how big [[simple_bit_set]] is.
+The false-positive rate is more dynamic: it is the ratio of EXPRESS IN TERMS OF CODE, [[filter_hit]] AND SUCH.
+
+We can set $n$ directly, of course, and the other parameter we have is $k$.
+We also want an estimate of the \emph{final} size of our set $m$.
+(This $m$ is the number of elements that ultimately end up in [[core_data]].)
+This introduction of $m$ implies something subtle: many times in code we use set-data-structures to add and remove elements frequently.
+A Bloom filter is geared towards summarizing a \emph{read-only-set}---the collection of data we care about already exists and is fixed, and we do a one-time generation.
+DRILL INTO THIS MORE, MAYBE IN ANOTHER SECTION (EARLIER?). DIFFERENCE BETWEEN THEORY AND PRACTICE, THEY LEAVE THESE APPLICATION RESTRICTIONS IMPICIT.
+
+So in that spirit, let's fix $m$. As we'll
+\section{Empirical Validation}\label{sec:empvalidation}
+\subsection{Properties of a Bloom Filter}
+We validate density here
+\subsection{Properties of a Filtered Set}
+We validate the filter-hit
+We also do timing.
+\section{Conclusion}
+Isn't this neat.
+\appendix
+\section{Complete Code Listings}
+\subsection{Bloom Filter (bloomfilter.h)}
+\inputminted{c++}{bloomfilter.h}
+\end{document}
+
+% Original paper:
+% https://dl.acm.org/doi/10.1145/362686.362692
+% https://dl.acm.org/doi/pdf/10.1145/362686.362692
