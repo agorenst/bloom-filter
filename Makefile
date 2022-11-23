@@ -11,6 +11,8 @@ bloomfilter.pdf : bloomfilter.tex $(files)
 		pdflatex -shell-escape $(basename $<)
 		pdflatex -shell-escape $(basename $<)
 experiment: datagen.o murmur/MurmurHash3.o
+falsepositiveexperiment: datagen.o murmur/MurmurHash3.o
+setapplicationexperiment: datagen.o murmur/MurmurHash3.o
 bloom_filter: datagen.o murmur/MurmurHash3.o
 
 bloomfilter.tex : bloomfilter.nw
@@ -23,4 +25,4 @@ $(files): % : bloomfilter.nw
 	notangle -R$* $^ | cpif $@
 
 clean:
-	rm -r -f bloom_filter experiment datagen *~ *.o murmur/*.o *.pdf *.bcf *.aux *.bbl *.log *.blg
+	rm -r -f bloom_filter falsepositiveexperiment experiment datagen *~ *.o murmur/*.o *.pdf *.bcf *.aux *.bbl *.log *.blg
