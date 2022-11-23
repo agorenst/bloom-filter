@@ -21,7 +21,7 @@ void empirical_epsilon() {
   for (size_t k = 1; k < 11; k++) {
     for (size_t f = 1; f < 11; f++) {
       auto m = n * f;
-      bloom_filter<std::string> bf(m, k);
+      bloom_filter<std::string, string_hash> bf(m, k);
       std::for_each(to_add_begin, to_add_end, [&bf](auto &s) { bf.set(s); });
       // Validate:
       assert(std::all_of(to_add_begin, to_add_end,

@@ -3,6 +3,7 @@
 #include <forward_list>
 #include <functional>
 #include <iostream>
+#include <numeric>
 #include <unordered_set>
 #include <vector>
 
@@ -21,11 +22,9 @@ public:
   }
   void set(unsigned int i) { data[(i / pageSize)].set(i % pageSize); }
   int count() const {
-    int sum = 0;
-    for (auto &&p : data) {
-      sum += p.count();
-    }
-    return sum;
+    return std::transform_reduce(std::begin(data), std::end(data), 0,
+                                 std::plus{},
+                                 [](auto &p) { return p.count(); });
   }
   int size() const { return data.size() * pageSize; }
   std::string to_string() const {
@@ -45,29 +44,29 @@ size_t string_hash(const std::string &v, uint32_t i) {
 
 template <class V, size_t (*F)(const V &, uint32_t s)> class bloom_filter {
 private:
-  simple_bit_set data;
+  simple_bit_set b;
 
 public:
-  const size_t size;
-  const size_t k;
-  bloom_filter(const size_t size, const size_t k)
-      : data(size), size(size), k(k) {}
+  const size_t N;
+  const size_t d;
+  bloom_filter(const size_t N, const size_t d) : b(N), N(N), d(d) {}
+
   void set(const V &v) {
-    for (size_t i = 0; i < k; i++) {
-      data.set(F(v, i) % size);
+    for (size_t i = 0; i < d; i++) {
+      b.set(F(v, i) % N);
     }
   }
   bool test(const V &v) const {
-    for (size_t i = 0; i < k; i++) {
-      if (!data.test(F(v, i) % size)) {
+    for (size_t i = 0; i < d; i++) {
+      if (!b.test(F(v, i) % N)) {
         return false;
       }
     }
     return true;
   }
-  size_t count() const { return data.count(); }
+  size_t count() const { return b.count(); }
   double density() const {
-    return static_cast<double>(count()) / static_cast<double>(size);
+    return static_cast<double>(count()) / static_cast<double>(N);
   }
-  std::string to_string() const { return data.to_string(); }
+  std::string to_string() const { return b.to_string(); }
 };
