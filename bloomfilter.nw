@@ -93,7 +93,7 @@ private:
 public:
   const size_t n;
   const size_t k;
-  bloom_filter(const size_t n, const size_t k) : b(n), n(n), k(k) {}
+  bloom_filter(const size_t n, const size_t k) : A(n), n(n), k(k) {}
 @
 The field [[A]] is the core sequence of bits.
 When we talk about ``setting'' or ``checking'' bits, we are referencing [[A]].
@@ -147,11 +147,15 @@ bool test(const V &s) const {
 This completes the core of our implementation.
 We can wrap these up in a stand-alone C++ header defining this object, like so:
 <<bloomfilter.h>>=
+#include "simplebitset.h"
+#include <cstddef>
+#include <cstdint>
 <<Bloom Filter C++ Type Interface>>
 class bloom_filter {
   <<Bloom filter state and construction>>
   <<Bloom filter set>>
   <<Bloom filter test>>
+  int count() const { return A.count(); }
 };
 @
 
@@ -168,6 +172,9 @@ We will address these in turn.
 Some languages have this built in already.
 The language C++ has it, but not really, so we do this:
 <<simplebitset.h>>=
+#include <bitset>
+#include <numeric>
+#include <vector>
 class simple_bit_set {
 private:
   static const int pageSize = 64;
@@ -260,8 +267,148 @@ DRILL INTO THIS MORE, MAYBE IN ANOTHER SECTION (EARLIER?). DIFFERENCE BETWEEN TH
 
 So in that spirit, let's fix $m$. As we'll
 \section{Empirical Validation}\label{sec:empvalidation}
+\subsection{Creating Data}
+We need resources by which we can run our experiments.
+In this case, we need a large set of strings to populate our bloom filter,
+and then a collection of strings that may (or may not) be in the set.
+We can find real-world datasets, but for our purposes we can ``just'' generate random strings.
+
+Let's model our need for random strings as a generator:
+<<String Generator Class>>=
+class string_generator {
+  std::random_device rd;
+  std::default_random_engine e1;
+  std::uniform_int_distribution<int> uniform_dist;
+public:
+  string_generator();
+  std::string operator()(size_t len);
+};
+@
+
+There are a lot of particulars about the [[std]] machinery used here that we won't get in to.
+For our purposes, we're just using them as a ``black box'' to get a nice selection of random strings expediently.
+
+Explicitly, we can get random strings like:
+<<Generator Implementation>>=
+const static std::string letterSet =
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+string_generator::string_generator()
+    : e1(rd()), uniform_dist(0, letterSet.size()) {}
+
+std::string string_generator::operator()(size_t len) {
+  std::string next;
+  next.reserve(len);
+  for (size_t c = 0; c < len; c++) {
+    next += letterSet[uniform_dist(e1)];
+  }
+  return next;
+}
+@
+
+The [[letterSet]] collection is just a way to, in case if it's needed, ensure our
+random strings are easily human-readable.
+The constructor essentially handles the random-number-generator-initialization.
+Finally, the [[operator()]] method is how we get our string.
+
+TODO: fixed seed?
+
+How is this generator used?
+Our intention is to create a collection of random strings.
+For expedience and conceptual simplicity, what we'll do is use our generator as much as we
+need to generate random strings, and add them to a set.
+In this way, when our set (which will implicitly exclude any duplicates!) will end up
+with the number of strings we asked for.
+<<Creating Strings with the Generator>>=
+std::vector<std::string> create_strings(size_t count, size_t len) {
+  std::unordered_set<std::string> unique_strings;
+  string_generator g;
+  while (unique_strings.size() < count) {
+    unique_strings.insert(g(len));
+  }
+  std::vector<std::string> data(std::begin(unique_strings),
+                                std::end(unique_strings));
+  return data;
+}
+@
+
+So we have our generator package all set up:
+
+<<datagen.h>>=
+#include <random>
+#include <string>
+#include <vector>
+<<String Generator Class>>
+std::vector<std::string> create_strings(size_t count, size_t len);
+@
+
+<<datagen.cpp>>=
+#include "datagen.h"
+
+#include <unordered_set>
+<<Generator Implementation>>
+<<Creating Strings with the Generator>>
+@
+
+At this point, we have our analytical results, our Bloom filter implementation,
+and a means to exercise that Bloom filter.
+Let's get some empirical results!
 \subsection{Properties of a Bloom Filter}
-We validate density here
+Let's prepare our test bench for the experiment.
+First, we can prepare the strings we want to use.
+<<Experiment Setup 1>>=
+  const size_t N = 1'000'000;
+  const auto strings = create_strings(N, 10);
+@
+Next, let's build our Bloom filter with the desired parameters:
+<<Experiment Setup 2>>=
+  const double desired_eps = 0.01;
+  const double best_bits = -1.44 * std::log2(desired_eps);
+  size_t m = N * best_bits;
+  size_t k = size_t(-std::log2(desired_eps)) + 1;
+  bloom_filter<std::string, string_hash> bf(m, k);
+@
+Now we've constructed our things.
+Now let's run our first experiment: estimating bit density.
+We expect it to be very close to 0.5, i.e., half the bits should be set.
+So, how do we initialize our Bloom filter?
+<<Initialize Bloom Filter>>=
+  std::for_each(std::begin(strings), std::end(strings),
+                [&bf](auto &s) { bf.set(s); });
+@
+
+We also need to plumb in the hashing function.
+<<Hashing Function>>=
+size_t string_hash(uint32_t i, const std::string &v) {
+  uint32_t hash;
+  MurmurHash3_x86_32(v.c_str(), v.size(), i, &hash);
+  return static_cast<size_t>(hash);
+}
+@
+
+<<experiment.cpp>>=
+#include "bloomfilter.h"
+#include "datagen.h"
+#include "murmur/MurmurHash3.h"
+#include <algorithm>
+#include <cstdint>
+#include <cstdio>
+#include <iterator>
+#include <numeric>
+<<Hashing Function>>
+void experiment() {
+  <<Experiment Setup 1>>
+  <<Experiment Setup 2>>
+  <<Initialize Bloom Filter>>
+  const double density =
+      static_cast<double>(bf.count()) / static_cast<double>(bf.n);
+  printf("density: %f\n", density);
+}
+@
+Hooray
+
+Observation: we ``initialize'' our Bloom filter, we add strings to it.
+It is a lot more read-only than other sets.
 \subsection{Properties of a Filtered Set}
 We validate the filter-hit
 We also do timing.

@@ -23,4 +23,4 @@ $(files): % : bloomfilter.nw
 	notangle -R$* $^ | cpif $@
 
 clean:
-	rm -r -f bloom_filter datagen *~ *.o murmur/*.o *.pdf *.bcf *.aux *.bbl *.log *.blg
+	rm -r -f bloom_filter experiment datagen *~ *.o murmur/*.o *.pdf *.bcf *.aux *.bbl *.log *.blg

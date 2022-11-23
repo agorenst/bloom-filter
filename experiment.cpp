@@ -1,38 +1,28 @@
-#include <cassert>
-
-#include "bloom_filter.h"
+#include "bloomfilter.h"
 #include "datagen.h"
-
-// Given n, consider dimensions f = m/n and k
-
-void empirical_epsilon() {
-  // 1,000,000 strings to add to our set,
-  // 100,000 strings explicitly not in our set,
-  // all strings exactly length 10
-  const size_t n = 1000000;
-  const size_t test_size = 1000000;
-  auto data = seed_strings(n, test_size, 10);
-
-  auto to_add_begin = std::begin(data);
-  auto to_add_end = to_add_begin + test_size;
-  auto to_test_begin = to_add_end;
-  auto to_test_end = std::end(data);
-
-  for (size_t k = 1; k < 11; k++) {
-    for (size_t f = 1; f < 11; f++) {
-      auto m = n * f;
-      bloom_filter<std::string, string_hash> bf(m, k);
-      std::for_each(to_add_begin, to_add_end, [&bf](auto &s) { bf.set(s); });
-      // Validate:
-      assert(std::all_of(to_add_begin, to_add_end,
-                         [&bf](const auto &s) { return bf.test(s); }));
-      auto fp = std::count_if(to_test_begin, to_test_end,
-                              [&bf](const auto &s) { return bf.test(s); });
-      auto fp_rate = static_cast<double>(fp) / static_cast<double>(test_size);
-      std::cout << "k=" << k << "\tm=" << m << "\tfpr=%" << (fp_rate * 100.0)
-                << "\td=%" << (bf.density() * 100.0) << std::endl;
-    }
-  }
+#include "murmur/MurmurHash3.h"
+#include <algorithm>
+#include <cstdint>
+#include <cstdio>
+#include <iterator>
+#include <numeric>
+size_t string_hash(uint32_t i, const std::string &v) {
+  uint32_t hash;
+  MurmurHash3_x86_32(v.c_str(), v.size(), i, &hash);
+  return static_cast<size_t>(hash);
 }
-
-int main() { empirical_epsilon(); }
+void experiment() {
+  const size_t N = 1'000'000;
+  const auto strings = create_strings(N, 10);
+  const double desired_eps = 0.01;
+  const double best_bits = -1.44 * std::log2(desired_eps);
+  size_t m = N * best_bits;
+  size_t k = size_t(-std::log2(desired_eps)) + 1;
+  bloom_filter<std::string, string_hash> bf(m, k);
+  std::for_each(std::begin(strings), std::end(strings),
+                [&bf](auto &s) { bf.set(s); });
+  const double density =
+      static_cast<double>(bf.count()) / static_cast<double>(bf.n);
+  printf("density: %f\n", density);
+}
+int main() { experiment(); }
