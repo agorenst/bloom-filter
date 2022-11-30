@@ -7,7 +7,9 @@ files=$(shell for r in `noroots bloomfilter.nw | grep -v " "`; do echo $${r:2:-2
 
 bloomfilter.pdf : bloomfilter.tex $(files)
 		pdflatex -shell-escape $(basename $<)
+		pdflatex -shell-escape $(basename $<)
 		biber $(basename $<)
+		pdflatex -shell-escape $(basename $<)
 		pdflatex -shell-escape $(basename $<)
 		pdflatex -shell-escape $(basename $<)
 experiment: datagen.o murmur/MurmurHash3.o
