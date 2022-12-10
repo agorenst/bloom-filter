@@ -6,16 +6,16 @@ CXXFLAGS=-Wall -O2 -std=c++17 -g
 files=$(shell for r in `noroots bloomfilter.nw | grep -v " "`; do echo $${r:2:-2}; done)
 
 bloomfilter.pdf : bloomfilter.tex $(files)
-		pdflatex -shell-escape $(basename $<)
-		pdflatex -shell-escape $(basename $<)
-		biber $(basename $<)
-		pdflatex -shell-escape $(basename $<)
-		pdflatex -shell-escape $(basename $<)
-		pdflatex -shell-escape $(basename $<)
-experiment: datagen.o murmur/MurmurHash3.o
-falsepositiveexperiment: datagen.o murmur/MurmurHash3.o
-setapplicationexperiment: datagen.o murmur/MurmurHash3.o
-bloom_filter: datagen.o murmur/MurmurHash3.o
+		latexmk -pdf -shell-escape $(basename $<)
+
+deps=datagen.o murmur/MurmurHash3.o
+progs=experiment falsepositiveexperiment setapplicationexperiment bitcounttest
+experiments: $(files) $(progs)
+
+experiment: $(deps)
+falsepositiveexperiment: $(deps)
+setapplicationexperiment: $(deps)
+bitcounttest: $(deps)
 
 bloomfilter.tex : bloomfilter.nw
 		./myweave.sh $< > $@
@@ -27,4 +27,5 @@ $(files): % : bloomfilter.nw
 	notangle -R$* $^ | cpif $@
 
 clean:
-	rm -r -f bloom_filter falsepositiveexperiment experiment datagen *~ *.o murmur/*.o *.pdf *.bcf *.aux *.bbl *.log *.blg
+	latexmk -pdf -shell-escape bloomfilter -CA
+	rm -r -f $(files) $(deps) $(progs) *~ *.o *.tex

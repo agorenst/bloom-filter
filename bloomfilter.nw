@@ -3,6 +3,7 @@
 \title{Bloom Filter Implementation}
 \date{\today}
 
+\usepackage{hyperref}
 \usepackage{noweb}
 \usepackage{cleveref}
 \usepackage{listing}
@@ -13,6 +14,9 @@
 
 \begin{document}
 \maketitle
+
+\tableofcontents
+
 \section{Introduction}
 As a data structure to explore, Bloom filters\cite{bloom1970} seem to hit the ``sweet spot'' in a number of ways.
 \begin{enumerate}
@@ -217,16 +221,14 @@ At this point, we've essentially emulated the typical introduction to a Bloom fi
 
 Let's demonstrate 
 <<bloomfilterset.h>>=
-#include "bloom_filter.h"
+#include "bloomfilter.h"
 #include <set>
-template <class V, size_t (*F)(const V &, uint32_t)>
+template <class V, size_t (*F)(uint32_t, const V &)>
 class bloom_filtered_set {
   std::set<V> core_data;
   bloom_filter<V, F> filter;
 
 public:
-  mutable size_t filter_hit = 0;
-
   bloom_filtered_set(size_t size, size_t k) : filter(size, k) {}
 
   <<Filtered Set Add>>
@@ -244,7 +246,6 @@ void add(const V &v) {
 <<Filtered Set Test>>=
 int contains(const V &v) const {
   if (!filter.test(v)) {
-    filter_hit++; // for diagnostics
     return false;
   }
   return core_data.find(v) != core_data.end();
@@ -531,9 +532,11 @@ All that is left is piecing it together:
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <iostream>
 #include <iterator>
 #include <chrono>
 #include <numeric>
+<<Hashing Function>>
 void experiment() {
   const size_t N = 1'000'000;
   const auto strings = create_strings(N*2, 10);
@@ -558,9 +561,46 @@ void experiment() {
 int main() { experiment(); }
 @
 
-ANOTHER EXPERIMENT: WE ALWAYS NEED 10 BITS, NO MORE!
+\subsection{Constant Bit Size}
+One thing noted about Bloom filters is that we always need ``about'' 10 bits for \emph{any} value,
+even if that value is extremely large.
+<<bitcounttest.cpp>>=
+#include "bloomfilterset.h"
+#include "datagen.h"
+#include "murmur/MurmurHash3.h"
+#include <algorithm>
+#include <cstdint>
+#include <cstdio>
+#include <iostream>
+#include <iterator>
+#include <chrono>
+#include <numeric>
+<<Hashing Function>>
+void experiment() {
+  const size_t N = 100'000;
+  const auto strings = create_strings(N*2, 10'000);
+  const double desired_eps = 0.01;
+  const double best_bits = -1.44 * std::log2(desired_eps);
+  size_t m = N * best_bits;
+  size_t k = size_t(-std::log2(desired_eps)) + 1;
+  
+  auto to_add_begin = std::begin(strings);
+  auto to_add_end = to_add_begin + N;
+  auto to_test_begin = to_add_end;
+  auto to_test_end = std::end(strings);
 
-ANOTHER EXPERIMENT: THE REAL WORLD HAS, E.G., COMPILER OPTIMIZATIONS!
+  <<Experiment 3 Build Sets>>
+  {
+    <<Experiment 3 Measure Base>>
+  }
+  {
+    <<Experiment 3 Measure Diff>>
+  }
+}
+int main() { experiment(); }
+@
+
+ANOTHER EXPERIMENT: THE REAL WORLD HAS, E.G., COMPILER OPTIMIZATIONS, and CODE BEHAVIOR CHANGES BASED ON THAT
 
 \section{Conclusion}
 Isn't this neat.
