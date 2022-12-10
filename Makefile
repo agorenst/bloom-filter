@@ -12,6 +12,8 @@ deps=datagen.o murmur/MurmurHash3.o
 progs=experiment falsepositiveexperiment setapplicationexperiment bitcounttest
 experiments: $(files) $(progs)
 
+driver: $(deps)
+
 experiment: $(deps)
 falsepositiveexperiment: $(deps)
 setapplicationexperiment: $(deps)

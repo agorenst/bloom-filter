@@ -116,6 +116,7 @@ Here already we have something of an extra hurdle from theoretical descriptions:
 With our parameters, and how they're set in our object, defined, we can turn to the key functionality:
 how do we add elements to our filter, and how do we test if an element was added to our filter?
 For these two operations we'll map the theoretical prose into code.
+These are all from \cite{mitzenmacher2005probability}.
 
 \paragraph{Adding Elements}
 \begin{quote}
@@ -194,18 +195,11 @@ public:
   }
   void set(unsigned int i) { data[(i / pageSize)].set(i % pageSize); }
   int count() const {
-    return std::transform_reduce(std::begin(data), std::end(data), 0,
-                                 std::plus{},
-                                 [](auto &p) { return p.count(); });
-  }
-  int size() const { return data.size() * pageSize; }
-  std::string to_string() const { // to help with debugging
-    std::string r;
-    for (auto &&p : data) {
-      r += p.to_string();
-    }
+    int r = 0;
+    for (const auto& p : data) { r += p.count(); }
     return r;
   }
+  int size() const { return data.size() * pageSize; }
 };
 @
 
@@ -230,26 +224,15 @@ class bloom_filtered_set {
 
 public:
   bloom_filtered_set(size_t size, size_t k) : filter(size, k) {}
-
-  <<Filtered Set Add>>
-  <<Filtered Set Test>>
-};
-@
-
-<<Filtered Set Add>>=
-void add(const V &v) {
-  filter.set(v);
-  core_data.insert(v);
-}
-@
-
-<<Filtered Set Test>>=
-int contains(const V &v) const {
-  if (!filter.test(v)) {
-    return false;
+  void add(const V &v) {
+    filter.set(v);
+    core_data.insert(v);
   }
-  return core_data.find(v) != core_data.end();
-}
+  int contains(const V &v) const {
+    if (!filter.test(v)) { return false; }
+    return core_data.find(v) != core_data.end();
+  }
+};
 @
 
 \section{Using Analytical Results}
@@ -352,6 +335,175 @@ std::vector<std::string> create_strings(size_t count, size_t len);
 #include <unordered_set>
 <<Generator Implementation>>
 <<Creating Strings with the Generator>>
+@
+
+<<driver.cpp>>=
+#include <algorithm>
+#include <unistd.h>
+#include <cstdlib>
+#include <cstdio>
+#include <cmath>
+#include <chrono>
+#include <set>
+
+#include <iostream>
+
+#include "bloomfilterset.h"
+#include "murmur/MurmurHash3.h"
+#include "datagen.h"
+
+<<Hashing Function>> // TODO: REFACTOR
+
+int main(int argc, char* argv[]) {
+  int c;
+
+  bool run_density_experiment = false;
+  bool run_false_positive_experiment = false;
+  bool run_timing_experiment = false;
+  
+  double desired_epsilon = 1.0;
+  int num_strings_in_set = 0;
+  int num_strings_not_in_set = 0;
+  int length_of_strings = 0;
+  int rng_seed = 0;
+  
+  bool print_help = false;
+  int verbosity_level = 0;
+  while ((c = getopt(argc, argv, "dfte:n:m:l:hv:")) != -1) {
+    switch (c) {
+      // Which experiments to run:
+      case 'd': run_density_experiment = true; break;
+      case 'f': run_false_positive_experiment = true; break;
+      case 't': run_timing_experiment = true; break;
+      
+      // Parameters to the experiment
+      case 'e': desired_epsilon = std::strtod(optarg, nullptr); break;
+      case 'n': num_strings_in_set = std::strtol(optarg, nullptr, 0); break;
+      case 'm': num_strings_not_in_set = std::strtol(optarg, nullptr, 0); break;
+      case 'l': length_of_strings = std::strtol(optarg, nullptr, 0); break;
+      case 's': rng_seed = std::strtol(optarg, nullptr, 0); break;
+
+      // Meta-parameters
+      case 'h': print_help = true; break;
+      case 'v': verbosity_level = std::strtol(optarg, nullptr, 0); break;
+    }
+  }
+  <<Print Driver Parameters>>
+  if (!run_density_experiment && !run_false_positive_experiment && !run_timing_experiment) {
+    printf("Error: no requested experiment!\n");
+    return 1;
+  }
+  if (desired_epsilon < 0 || desired_epsilon >= 1) {
+    printf("Error: desired_epsilon must be between 0 and 1, got %f\n", desired_epsilon);
+    return 1;
+  }
+  if (num_strings_in_set < 0) {
+    printf("Error: num_strings_in_set must be non-negative, got %d\n", num_strings_in_set);
+    return 1;
+  }
+  if (length_of_strings <= 0) {
+    printf("Error: length_of_strings must be positive, got %d\n", length_of_strings);
+    return 1;
+  }
+  const double best_bits = -1.44 * std::log2(desired_epsilon);
+  size_t m = num_strings_in_set * best_bits;
+  size_t k = size_t(-std::log2(desired_epsilon)) + 1;
+  if (verbosity_level >= 1) {
+    printf("Calculated best bits per value: %f, total number of bits: %ld, number of hash functions: %ld\n",
+             best_bits, m, k);
+  }
+  
+  if (run_density_experiment) {
+    const auto strings = create_strings(num_strings_in_set, length_of_strings);
+    if (verbosity_level >= 2) { printf("Done generating strings\n"); }
+
+    bloom_filter<std::string, string_hash> bf(m, k);
+    for (auto& s : strings) {
+      bf.set(s);
+    }
+    const double density =
+      static_cast<double>(bf.count()) / static_cast<double>(bf.n);
+    printf("bloom filter density: %f\n", density);
+  }
+
+  if (run_false_positive_experiment) {
+    if (num_strings_not_in_set <= 0) {
+      printf("Error, for false positive experiment num_strings_not_in_set must be positive, got %d\n",
+             num_strings_not_in_set);
+      return 1;
+    }
+    auto total_strings = num_strings_in_set + num_strings_not_in_set;
+    if (verbosity_level >= 1) {
+      printf("total_strings: %d\n", total_strings);
+    }
+    const auto strings = create_strings(total_strings, length_of_strings);
+    if (verbosity_level >= 2) { printf("Done generating strings\n"); }
+    auto strings_in_set_end = std::begin(strings) + num_strings_in_set;
+
+    bloom_filter<std::string, string_hash> bf(m, k);
+    std::for_each(std::begin(strings), strings_in_set_end,
+                  [&bf](auto &s) { bf.set(s); });
+
+    auto false_positives = std::count_if(strings_in_set_end, std::end(strings),
+                                         [&bf](auto &v) { return bf.test(v); });
+    double fp_rate = double(false_positives) /
+                     double(num_strings_not_in_set);
+    printf("false positive rate: %f\n", fp_rate);
+  }
+
+  if (run_timing_experiment) {
+    if (num_strings_not_in_set <= 0) {
+      printf("Error, for timing experiment num_strings_not_in_set must be positive, got %d\n",
+             num_strings_not_in_set);
+      return 1;
+    }
+    auto total_strings = num_strings_in_set + num_strings_not_in_set;
+    if (verbosity_level >= 1) {
+      printf("total_strings: %d\n", total_strings);
+    }
+    const auto strings = create_strings(total_strings, length_of_strings);
+    if (verbosity_level >= 2) { printf("Done generating strings\n"); }
+    auto strings_in_set_end = std::begin(strings) + num_strings_in_set;
+    
+    std::set<std::string> base_set;
+    bloom_filtered_set<std::string, string_hash> filtered_set(m, k);
+    for (auto it = std::begin(strings); it != strings_in_set_end; it++) {
+      base_set.insert(*it);
+      filtered_set.add(*it);
+    }
+
+    auto to_test_begin = strings_in_set_end;
+    auto to_test_end = std::end(strings);
+    {
+      <<Experiment 3 Measure Base>>
+    }
+    {
+      <<Experiment 3 Measure Diff>>
+    }
+  }
+}
+@
+
+<<Print Driver Parameters>>=
+if (verbosity_level != 0) {
+  printf("parameters:\n"
+    "\tprint_help=%s\n"
+    "\tverbosity_level=%d\n"
+    "\trun_density_experiment=%s\n"
+    "\trun_false_positive_experiment=%s\n"
+    "\trun_timing_experiment=%s\n"
+    "\tdesired_epsilon=%f\n"
+    "\tnum_strings_in_set=%d\n"
+    "\tnum_strings_not_in_set=%d\n"
+    "\tlength_of_strings=%d\n"
+    "\trng_seed=%d\n",
+    print_help ? "true" : "false", verbosity_level,
+    run_density_experiment ? "true" : "false",
+    run_false_positive_experiment ? "true" : "false",
+    run_timing_experiment ? "true" : "false",
+    desired_epsilon, num_strings_in_set, num_strings_not_in_set,
+    length_of_strings, rng_seed);
+}
 @
 
 At this point, we have our analytical results, our Bloom filter implementation,
