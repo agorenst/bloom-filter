@@ -156,10 +156,8 @@ We can wrap these up in a stand-alone C++ header defining this object, like so:
 <<bloomfilter.h>>=
 #pragma once
 #include "simplebitset.h"
-#include "murmur/MurmurHash3.h"
 #include <cstddef>
 #include <cstdint>
-#include <string>
 <<Bloom Filter C++ Type Interface>>
 class bloom_filter {
   <<Bloom filter state and construction>>
@@ -167,8 +165,6 @@ class bloom_filter {
   <<Bloom filter test>>
   int count() const { return A.count(); }
 };
-
-<<Hashing Function>>
 @
 
 We are not quite done with our implementation.
@@ -184,6 +180,7 @@ We will address these in turn.
 Some languages have this built in already.
 The language C++ has it, but not really, so we do this:
 <<simplebitset.h>>=
+#pragma once
 #include <bitset>
 #include <numeric>
 #include <vector>
@@ -228,6 +225,7 @@ At this point, we've essentially emulated the typical introduction to a Bloom fi
 
 Let's demonstrate 
 <<bloomfilterset.h>>=
+#pragma once
 #include "bloomfilter.h"
 #include <set>
 template <class V, size_t (*F)(uint32_t, const V &)>
@@ -362,8 +360,8 @@ The overall design is outlined in \cref{driver.cpp}.
 
 <<driver.cpp>>=
 <<Driver Headers>>
-<<Driver Utility Functions>>
 <<Bloom Filter Settings>>
+<<Driver Utility Functions>>
 <<Possible Bloom Filter Experiments>>
 int main(int argc, char* argv[]) {
   <<Read Command-Line Parameters>>
@@ -379,12 +377,14 @@ double desired_epsilon = 0.0;
 int num_strings_in_set = 0;
 int num_strings_not_in_set = 0;
 int length_of_strings = 0;
+int rounding_constant = 0;
   
 bool print_help = false;
 int verbosity_level = 0;
 
-size_t m = 0;
-size_t k = 0;
+size_t num_hash_functions = 0;
+double num_bits_per_value = 0.0;
+size_t num_bits_in_filter = 0;
   
 bool run_density_experiment = false;
 bool run_false_positive_experiment = false;
@@ -393,7 +393,7 @@ bool run_application_experiment = false;
 We set those settings through command-line parsing:
 <<Read Command-Line Parameters>>=
 int c;
-while ((c = getopt(argc, argv, "dfae:n:m:l:hv:")) != -1) {
+while ((c = getopt(argc, argv, "dfae:n:x:l:k:b:m:rhv:")) != -1) {
   switch (c) {
     // Which experiments to run:
     case 'd': run_density_experiment = true; break;
@@ -403,8 +403,12 @@ while ((c = getopt(argc, argv, "dfae:n:m:l:hv:")) != -1) {
     // Parameters to the experiment
     case 'e': desired_epsilon = std::strtod(optarg, nullptr); break;
     case 'n': num_strings_in_set = std::strtol(optarg, nullptr, 0); break;
-    case 'm': num_strings_not_in_set = std::strtol(optarg, nullptr, 0); break;
+    case 'x': num_strings_not_in_set = std::strtol(optarg, nullptr, 0); break;
     case 'l': length_of_strings = std::strtol(optarg, nullptr, 0); break;
+    case 'k': num_hash_functions = std::strtol(optarg, nullptr, 0); break; 
+    case 'b': num_bits_per_value = std::strtod(optarg, nullptr); break; 
+    case 'm': num_bits_in_filter = std::strtol(optarg, nullptr, 0); break; 
+    case 'r': rounding_constant = 1; break;
 
     // Meta-parameters
     case 'h': print_help = true; break;
@@ -431,16 +435,30 @@ if (length_of_strings <= 0) {
   printf("Error: length_of_strings must be positive, got %d\n", length_of_strings);
   return 1;
 }
+if (num_bits_per_value < 0) {
+  printf("Error: num_bits_per_value must be positive, got %f\n", num_bits_per_value);
+  return 1;
+}
 @
+And then we have optional parameters
 We prepare experiments by calculating m and k if they're not specified
 <<Prepare Experiments>>=
-<<Print Driver Parameters>>
-const double best_bits = -1.44 * std::log2(desired_epsilon);
-m = num_strings_in_set * best_bits;
-k = size_t(-std::log2(desired_epsilon)) + 1;
+if (verbosity_level != 0) {
+  print_driver_state();
+}
+if (num_bits_per_value == 0.0) {
+  // Specify default to be "optimal".
+  num_bits_per_value = -1.44 * std::log2(desired_epsilon);
+}
+if (num_bits_in_filter == 0) {
+  num_bits_in_filter = num_strings_in_set * num_bits_per_value;
+}
+if (num_hash_functions == 0) {
+  num_hash_functions = size_t(-std::log2(desired_epsilon)) + rounding_constant;
+}
 if (verbosity_level >= 1) {
   printf("Calculated best bits per value: %f, total number of bits: %ld, number of hash functions: %ld\n",
-           best_bits, m, k);
+           num_bits_per_value, num_bits_in_filter, num_hash_functions);
 }
 @
 And then finally we run the experiments we choose:
@@ -473,6 +491,9 @@ if (run_application_experiment) {
 @
 
 <<Driver Utility Functions>>=
+<<Hashing Function>>
+<<Print Driver Parameters>>
+<<Timer Object>>
 @
 
 <<Driver Headers>>=
@@ -483,15 +504,18 @@ if (run_application_experiment) {
 #include <cmath>
 #include <chrono>
 #include <set>
+#include <string>
 
 #include <iostream>
 
+#include "bloomfilter.h"
 #include "bloomfilterset.h"
 #include "datagen.h"
+#include "murmur/MurmurHash3.h"
 @
 
 <<Print Driver Parameters>>=
-if (verbosity_level != 0) {
+void print_driver_state() {
   printf("parameters:\n"
     "\tprint_help=%s\n"
     "\tverbosity_level=%d\n"
@@ -516,12 +540,13 @@ and a means to exercise that Bloom filter.
 Let's get some empirical results!
 
 \subsection{Compute Expected Density of Optimal Bloom Filter}
+Here is the code that we want to run:
 <<Bloom Filter Optimal Density>>=
 void optimal_density(void) {
   const auto strings = create_strings(num_strings_in_set, length_of_strings);
   if (verbosity_level >= 2) { printf("Done generating strings\n"); }
 
-  bloom_filter<std::string, string_hash> bf(m, k);
+  bloom_filter<std::string, string_hash> bf(num_bits_in_filter, num_hash_functions);
   for (auto& s : strings) {
     bf.set(s);
   }
@@ -530,7 +555,7 @@ void optimal_density(void) {
   printf("bloom filter density: %f\n", density);
 }
 @
-
+See the Makefile for stuff
 
 \subsection{Bloom Filter False Positivity}
 This is one experiment!
@@ -544,7 +569,7 @@ void false_positive_rate(void) {
   if (verbosity_level >= 2) { printf("Done generating strings\n"); }
   auto strings_in_set_end = std::begin(strings) + num_strings_in_set;
 
-  bloom_filter<std::string, string_hash> bf(m, k);
+  bloom_filter<std::string, string_hash> bf(num_bits_in_filter, num_hash_functions);
   std::for_each(std::begin(strings), strings_in_set_end,
                 [&bf](auto &s) { bf.set(s); });
 
@@ -557,56 +582,74 @@ void false_positive_rate(void) {
 @
 
 \subsection{Accelerating A Set}
+We want to time our function.
+We can be a little funny and use C++'s RAII thing.
+<<Timer Object>>=
+class timer_object {
+  std::chrono::time_point<std::chrono::steady_clock> start;
+  double* elapsed_seconds;
+public:
+  timer_object(double* elapsed_seconds) {
+    this->elapsed_seconds = elapsed_seconds;
+    start = std::chrono::steady_clock::now();
+  }
+  ~timer_object() {
+    auto end = std::chrono::steady_clock::now();
+    std::chrono::duration<double> elapsed = end - start;
+    *elapsed_seconds = elapsed.count();
+  }
+};
+@
+
+We need to set up our two sets to compare:
+<<Set Up Application Comparison>>=
+auto total_strings = num_strings_in_set + num_strings_not_in_set;
+if (verbosity_level >= 1) {
+  printf("total_strings: %d\n", total_strings);
+}
+const auto strings = create_strings(total_strings, length_of_strings);
+if (verbosity_level >= 2) { printf("Done generating strings\n"); }
+auto strings_in_set_end = std::begin(strings) + num_strings_in_set;
+
+std::set<std::string> base_set;
+bloom_filtered_set<std::string, string_hash> filtered_set(num_bits_per_value, num_hash_functions);
+for (auto it = std::begin(strings); it != strings_in_set_end; it++) {
+  base_set.insert(*it);
+  filtered_set.add(*it);
+}
+
+auto to_test_begin = strings_in_set_end;
+auto to_test_end = std::end(strings);
+double seconds;
+@
 
 <<Bloom Filter Application>>=
 void bloom_filter_application(void) {
-  auto total_strings = num_strings_in_set + num_strings_not_in_set;
-  if (verbosity_level >= 1) {
-    printf("total_strings: %d\n", total_strings);
-  }
-  const auto strings = create_strings(total_strings, length_of_strings);
-  if (verbosity_level >= 2) { printf("Done generating strings\n"); }
-  auto strings_in_set_end = std::begin(strings) + num_strings_in_set;
-  
-  std::set<std::string> base_set;
-  bloom_filtered_set<std::string, string_hash> filtered_set(m, k);
-  for (auto it = std::begin(strings); it != strings_in_set_end; it++) {
-    base_set.insert(*it);
-    filtered_set.add(*it);
-  }
-
-  auto to_test_begin = strings_in_set_end;
-  auto to_test_end = std::end(strings);
+  <<Set Up Application Comparison>>
   {
-    auto start = std::chrono::steady_clock::now();
+    timer_object t(&seconds);
     size_t count = 0;
     for (auto it = to_test_begin; it != to_test_end; it++) {
       if (base_set.find(*it) != base_set.end()) {
         count++;
       }
     }
-    auto end = std::chrono::steady_clock::now();
-    
-    std::chrono::duration<double> elapsed = end - start;
-    printf("Tested against base in time %fs\n", elapsed.count());
   }
+  printf("Tested against base in time %fs\n", seconds);
+
   {
-    auto start = std::chrono::steady_clock::now();
+    timer_object t(&seconds);
     size_t count = 0;
     for (auto it = to_test_begin; it != to_test_end; it++) {
       if (filtered_set.contains(*it)) {
         count++;
       }
     }
-    auto end = std::chrono::steady_clock::now();
-
-    std::chrono::duration<double> elapsed = end - start;
-    printf("Tested against diff in time %fs\n", elapsed.count());
   }
+  printf("Tested against diff in time %fs\n", seconds);
 }
 @
-We validate the filter-hit rate.
-We also do timing.
+
 The goal of this experiment is to build some confidence that a Bloom filter provides
 a benefit.
 
@@ -614,11 +657,14 @@ a benefit.
 \section{Conclusion}
 Isn't this neat.
 \appendix
-\section{Complete Code Listings}
+\section{Library Code Listings}
 \subsection{Bloom Filter (bloomfilter.h)}\label{bloomfilterlisting}
 \inputminted{c++}{bloomfilter.h}
-\subsection{Bloom Filter (bloomfilter.h)}\label{bloomfiltersetlisting}
+\subsection{Bloom Filter Set (bloomfilterset.h)}\label{bloomfiltersetlisting}
 \inputminted{c++}{bloomfilterset.h}
+\section{Driver Code Listings}
+\subsection{Main Driver}
+\inputminted{c++}{driver.cpp}
 \end{document}
 
 % Original paper:
