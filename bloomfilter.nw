@@ -154,9 +154,12 @@ We're inclined to model the bloom filter as an object, as we do here, but the ps
 This completes the core of our implementation.
 We can wrap these up in a stand-alone C++ header defining this object, like so:
 <<bloomfilter.h>>=
+#pragma once
 #include "simplebitset.h"
+#include "murmur/MurmurHash3.h"
 #include <cstddef>
 #include <cstdint>
+#include <string>
 <<Bloom Filter C++ Type Interface>>
 class bloom_filter {
   <<Bloom filter state and construction>>
@@ -164,6 +167,8 @@ class bloom_filter {
   <<Bloom filter test>>
   int count() const { return A.count(); }
 };
+
+<<Hashing Function>>
 @
 
 We are not quite done with our implementation.
@@ -208,6 +213,14 @@ We use murmur3!
 Something I'm interested in: a nice \emph{theory} of a hashing algorithm.
 There are great empirical results that this is a good hashing algorithm.
 What explains that performance?
+
+<<Hashing Function>>=
+size_t string_hash(uint32_t i, const std::string &v) {
+  uint32_t hash;
+  MurmurHash3_x86_32(v.c_str(), v.size(), i, &hash);
+  return static_cast<size_t>(hash);
+}
+@
 
 \section{Bloom Filter Application}\label{sec:application}
 At this point, we've essentially emulated the typical introduction to a Bloom filter\cite{mitzenmacher2005probability}.
@@ -277,28 +290,26 @@ For our purposes, we're just using them as a ``black box'' to get a nice selecti
 
 Explicitly, we can get random strings like:
 <<Generator Implementation>>=
-const static std::string letterSet =
+const static std::string letter_set =
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
 string_generator::string_generator()
-    : e1(rd()), uniform_dist(0, letterSet.size()) {}
+    : e1(rd()), uniform_dist(0, letter_set.size()) {}
 
 std::string string_generator::operator()(size_t len) {
   std::string next;
   next.reserve(len);
   for (size_t c = 0; c < len; c++) {
-    next += letterSet[uniform_dist(e1)];
+    next += letter_set[uniform_dist(e1)];
   }
   return next;
 }
 @
 
-The [[letterSet]] collection is just a way to, in case if it's needed, ensure our
+The [[letter_set]] collection is just a way to, in case if it's needed, ensure our
 random strings are easily human-readable.
 The constructor essentially handles the random-number-generator-initialization.
 Finally, the [[operator()]] method is how we get our string.
-
-TODO: fixed seed?
 
 How is this generator used?
 Our intention is to create a collection of random strings.
@@ -337,7 +348,134 @@ std::vector<std::string> create_strings(size_t count, size_t len);
 <<Creating Strings with the Generator>>
 @
 
+\subsection{Experiment Driver}
+We can understand our previous code (\cref{bloomfilter.h, bloomfilterset.h}) as creating a library.
+In general one does not really ``run'' a library; it only makes sense to run the code as part of a larger piece of software.
+This is reflecting mechanically in our C++ code by the fact that none of our code so far has a [[main]] function.
+
+A common piece of software to provide with a library is a \emph{driver}, which can be understood as a limited piece of software,
+typically a command-line utility, that can take user input and exercise different pieces of code in the library.
+Code-compilers typically operate in this way, most notably LLVM makes that very explicit \cite{TOCITE}, but also other processing libraries.
+
+The code we'll implement for our experiments will not quite be an all-purpose driver, but is influenced by that mindset.
+The overall design is outlined in \cref{driver.cpp}.
+
 <<driver.cpp>>=
+<<Driver Headers>>
+<<Driver Utility Functions>>
+<<Bloom Filter Settings>>
+<<Possible Bloom Filter Experiments>>
+int main(int argc, char* argv[]) {
+  <<Read Command-Line Parameters>>
+  <<Error-Check Parameters>>
+  <<Prepare Experiments>>
+  <<Run Selected Experiments>>
+}
+@
+
+Here are all the settings we'd need for any experiment:
+<<Bloom Filter Settings>>=
+double desired_epsilon = 0.0;
+int num_strings_in_set = 0;
+int num_strings_not_in_set = 0;
+int length_of_strings = 0;
+  
+bool print_help = false;
+int verbosity_level = 0;
+
+size_t m = 0;
+size_t k = 0;
+  
+bool run_density_experiment = false;
+bool run_false_positive_experiment = false;
+bool run_application_experiment = false;
+@
+We set those settings through command-line parsing:
+<<Read Command-Line Parameters>>=
+int c;
+while ((c = getopt(argc, argv, "dfae:n:m:l:hv:")) != -1) {
+  switch (c) {
+    // Which experiments to run:
+    case 'd': run_density_experiment = true; break;
+    case 'f': run_false_positive_experiment = true; break;
+    case 'a': run_application_experiment = true; break;
+    
+    // Parameters to the experiment
+    case 'e': desired_epsilon = std::strtod(optarg, nullptr); break;
+    case 'n': num_strings_in_set = std::strtol(optarg, nullptr, 0); break;
+    case 'm': num_strings_not_in_set = std::strtol(optarg, nullptr, 0); break;
+    case 'l': length_of_strings = std::strtol(optarg, nullptr, 0); break;
+
+    // Meta-parameters
+    case 'h': print_help = true; break;
+    case 'v': verbosity_level = std::strtol(optarg, nullptr, 0); break;
+  }
+}
+@
+We want to make sure that we aren't asking for anything silly.
+There are probably more problems we can find, but this helps address simple typos
+<<Error-Check Parameters>>=
+if (!run_density_experiment && !run_false_positive_experiment && !run_application_experiment) {
+  printf("Error: no requested experiment!\n");
+  return 1;
+}
+if (desired_epsilon < 0 || desired_epsilon >= 1) {
+  printf("Error: desired_epsilon must be between 0 and 1, got %f\n", desired_epsilon);
+  return 1;
+}
+if (num_strings_in_set < 0) {
+  printf("Error: num_strings_in_set must be non-negative, got %d\n", num_strings_in_set);
+  return 1;
+}
+if (length_of_strings <= 0) {
+  printf("Error: length_of_strings must be positive, got %d\n", length_of_strings);
+  return 1;
+}
+@
+We prepare experiments by calculating m and k if they're not specified
+<<Prepare Experiments>>=
+<<Print Driver Parameters>>
+const double best_bits = -1.44 * std::log2(desired_epsilon);
+m = num_strings_in_set * best_bits;
+k = size_t(-std::log2(desired_epsilon)) + 1;
+if (verbosity_level >= 1) {
+  printf("Calculated best bits per value: %f, total number of bits: %ld, number of hash functions: %ld\n",
+           best_bits, m, k);
+}
+@
+And then finally we run the experiments we choose:
+<<Run Selected Experiments>>=
+if (run_density_experiment) {
+  optimal_density();
+}
+if (run_false_positive_experiment) {
+  if (num_strings_not_in_set <= 0) {
+    printf("Error, for false positive experiment num_strings_not_in_set must be positive, got %d\n",
+           num_strings_not_in_set);
+    return 1;
+  }
+  false_positive_rate();
+}
+if (run_application_experiment) {
+  if (num_strings_not_in_set <= 0) {
+    printf("Error, for timing experiment num_strings_not_in_set must be positive, got %d\n",
+           num_strings_not_in_set);
+    return 1;
+  }
+  bloom_filter_application();
+}
+@
+
+<<Possible Bloom Filter Experiments>>=
+<<Bloom Filter False Positive Rate>>
+<<Bloom Filter Optimal Density>>
+<<Bloom Filter Application>>
+@
+
+<<Driver Utility Functions>>=
+@
+
+<<Driver Headers>>=
 #include <algorithm>
 #include <unistd.h>
 #include <cstdlib>
@@ -349,139 +487,7 @@ std::vector<std::string> create_strings(size_t count, size_t len);
 #include <iostream>
 
 #include "bloomfilterset.h"
-#include "murmur/MurmurHash3.h"
 #include "datagen.h"
-
-<<Hashing Function>> // TODO: REFACTOR
-
-int main(int argc, char* argv[]) {
-  int c;
-
-  bool run_density_experiment = false;
-  bool run_false_positive_experiment = false;
-  bool run_timing_experiment = false;
-  
-  double desired_epsilon = 1.0;
-  int num_strings_in_set = 0;
-  int num_strings_not_in_set = 0;
-  int length_of_strings = 0;
-  int rng_seed = 0;
-  
-  bool print_help = false;
-  int verbosity_level = 0;
-  while ((c = getopt(argc, argv, "dfte:n:m:l:hv:")) != -1) {
-    switch (c) {
-      // Which experiments to run:
-      case 'd': run_density_experiment = true; break;
-      case 'f': run_false_positive_experiment = true; break;
-      case 't': run_timing_experiment = true; break;
-      
-      // Parameters to the experiment
-      case 'e': desired_epsilon = std::strtod(optarg, nullptr); break;
-      case 'n': num_strings_in_set = std::strtol(optarg, nullptr, 0); break;
-      case 'm': num_strings_not_in_set = std::strtol(optarg, nullptr, 0); break;
-      case 'l': length_of_strings = std::strtol(optarg, nullptr, 0); break;
-      case 's': rng_seed = std::strtol(optarg, nullptr, 0); break;
-
-      // Meta-parameters
-      case 'h': print_help = true; break;
-      case 'v': verbosity_level = std::strtol(optarg, nullptr, 0); break;
-    }
-  }
-  <<Print Driver Parameters>>
-  if (!run_density_experiment && !run_false_positive_experiment && !run_timing_experiment) {
-    printf("Error: no requested experiment!\n");
-    return 1;
-  }
-  if (desired_epsilon < 0 || desired_epsilon >= 1) {
-    printf("Error: desired_epsilon must be between 0 and 1, got %f\n", desired_epsilon);
-    return 1;
-  }
-  if (num_strings_in_set < 0) {
-    printf("Error: num_strings_in_set must be non-negative, got %d\n", num_strings_in_set);
-    return 1;
-  }
-  if (length_of_strings <= 0) {
-    printf("Error: length_of_strings must be positive, got %d\n", length_of_strings);
-    return 1;
-  }
-  const double best_bits = -1.44 * std::log2(desired_epsilon);
-  size_t m = num_strings_in_set * best_bits;
-  size_t k = size_t(-std::log2(desired_epsilon)) + 1;
-  if (verbosity_level >= 1) {
-    printf("Calculated best bits per value: %f, total number of bits: %ld, number of hash functions: %ld\n",
-             best_bits, m, k);
-  }
-  
-  if (run_density_experiment) {
-    const auto strings = create_strings(num_strings_in_set, length_of_strings);
-    if (verbosity_level >= 2) { printf("Done generating strings\n"); }
-
-    bloom_filter<std::string, string_hash> bf(m, k);
-    for (auto& s : strings) {
-      bf.set(s);
-    }
-    const double density =
-      static_cast<double>(bf.count()) / static_cast<double>(bf.n);
-    printf("bloom filter density: %f\n", density);
-  }
-
-  if (run_false_positive_experiment) {
-    if (num_strings_not_in_set <= 0) {
-      printf("Error, for false positive experiment num_strings_not_in_set must be positive, got %d\n",
-             num_strings_not_in_set);
-      return 1;
-    }
-    auto total_strings = num_strings_in_set + num_strings_not_in_set;
-    if (verbosity_level >= 1) {
-      printf("total_strings: %d\n", total_strings);
-    }
-    const auto strings = create_strings(total_strings, length_of_strings);
-    if (verbosity_level >= 2) { printf("Done generating strings\n"); }
-    auto strings_in_set_end = std::begin(strings) + num_strings_in_set;
-
-    bloom_filter<std::string, string_hash> bf(m, k);
-    std::for_each(std::begin(strings), strings_in_set_end,
-                  [&bf](auto &s) { bf.set(s); });
-
-    auto false_positives = std::count_if(strings_in_set_end, std::end(strings),
-                                         [&bf](auto &v) { return bf.test(v); });
-    double fp_rate = double(false_positives) /
-                     double(num_strings_not_in_set);
-    printf("false positive rate: %f\n", fp_rate);
-  }
-
-  if (run_timing_experiment) {
-    if (num_strings_not_in_set <= 0) {
-      printf("Error, for timing experiment num_strings_not_in_set must be positive, got %d\n",
-             num_strings_not_in_set);
-      return 1;
-    }
-    auto total_strings = num_strings_in_set + num_strings_not_in_set;
-    if (verbosity_level >= 1) {
-      printf("total_strings: %d\n", total_strings);
-    }
-    const auto strings = create_strings(total_strings, length_of_strings);
-    if (verbosity_level >= 2) { printf("Done generating strings\n"); }
-    auto strings_in_set_end = std::begin(strings) + num_strings_in_set;
-    
-    std::set<std::string> base_set;
-    bloom_filtered_set<std::string, string_hash> filtered_set(m, k);
-    for (auto it = std::begin(strings); it != strings_in_set_end; it++) {
-      base_set.insert(*it);
-      filtered_set.add(*it);
-    }
-
-    auto to_test_begin = strings_in_set_end;
-    auto to_test_end = std::end(strings);
-    {
-      <<Experiment 3 Measure Base>>
-    }
-    {
-      <<Experiment 3 Measure Diff>>
-    }
-  }
-}
 @
 
 <<Print Driver Parameters>>=
@@ -491,277 +497,128 @@ if (verbosity_level != 0) {
     "\tverbosity_level=%d\n"
     "\trun_density_experiment=%s\n"
     "\trun_false_positive_experiment=%s\n"
-    "\trun_timing_experiment=%s\n"
+    "\trun_application_experiment=%s\n"
     "\tdesired_epsilon=%f\n"
     "\tnum_strings_in_set=%d\n"
     "\tnum_strings_not_in_set=%d\n"
-    "\tlength_of_strings=%d\n"
-    "\trng_seed=%d\n",
+    "\tlength_of_strings=%d\n",
     print_help ? "true" : "false", verbosity_level,
     run_density_experiment ? "true" : "false",
     run_false_positive_experiment ? "true" : "false",
-    run_timing_experiment ? "true" : "false",
+    run_application_experiment ? "true" : "false",
     desired_epsilon, num_strings_in_set, num_strings_not_in_set,
-    length_of_strings, rng_seed);
+    length_of_strings);
 }
 @
 
 At this point, we have our analytical results, our Bloom filter implementation,
 and a means to exercise that Bloom filter.
 Let's get some empirical results!
-\subsection{Properties of a Bloom Filter}
-Let's prepare our test bench for the experiment.
-First, we can prepare the strings we want to use.
-<<Experiment Setup 1>>=
-  const size_t N = 1'000'000;
-  const auto strings = create_strings(N, 10);
-@
-Next, let's build our Bloom filter with the desired parameters:
-<<Experiment Setup 2>>=
-  const double desired_eps = 0.01;
-  const double best_bits = -1.44 * std::log2(desired_eps);
-  size_t m = N * best_bits;
-  size_t k = size_t(-std::log2(desired_eps)) + 1;
+
+\subsection{Compute Expected Density of Optimal Bloom Filter}
+<<Bloom Filter Optimal Density>>=
+void optimal_density(void) {
+  const auto strings = create_strings(num_strings_in_set, length_of_strings);
+  if (verbosity_level >= 2) { printf("Done generating strings\n"); }
+
   bloom_filter<std::string, string_hash> bf(m, k);
-@
-Now we've constructed our things.
-Now let's run our first experiment: estimating bit density.
-We expect it to be very close to 0.5, i.e., half the bits should be set.
-So, how do we initialize our Bloom filter?
-<<Initialize Bloom Filter>>=
-  std::for_each(std::begin(strings), std::end(strings),
-                [&bf](auto &s) { bf.set(s); });
-@
-
-We also need to plumb in the hashing function.
-<<Hashing Function>>=
-size_t string_hash(uint32_t i, const std::string &v) {
-  uint32_t hash;
-  MurmurHash3_x86_32(v.c_str(), v.size(), i, &hash);
-  return static_cast<size_t>(hash);
-}
-@
-
-<<experiment.cpp>>=
-#include "bloomfilter.h"
-#include "datagen.h"
-#include "murmur/MurmurHash3.h"
-#include <algorithm>
-#include <cstdint>
-#include <cstdio>
-#include <iterator>
-#include <numeric>
-<<Hashing Function>>
-void experiment() {
-  <<Experiment Setup 1>>
-  <<Experiment Setup 2>>
-  <<Initialize Bloom Filter>>
+  for (auto& s : strings) {
+    bf.set(s);
+  }
   const double density =
-      static_cast<double>(bf.count()) / static_cast<double>(bf.n);
-  printf("density: %f\n", density);
+    static_cast<double>(bf.count()) / static_cast<double>(bf.n);
+  printf("bloom filter density: %f\n", density);
 }
-int main() { experiment(); }
 @
-Hooray
 
-TODO: INVITES MORE QUESTIONS, we don't get exact density (of course), how is it that it varies?
-Can we be more precise in computing this?
-
-Observation in doing actual application: we ``initialize'' our Bloom filter, we add strings to it.
-It is a lot more read-only than other sets.
 
 \subsection{Bloom Filter False Positivity}
-For our second experiment, let's validate that we really do get the desired $\epsilon$ error rate.
-We'll construct a Bloom filter in a similar manner, and then test membership of strings we \emph{know}
-are not in the Bloom filter. (TODO: ``in the Bloom filter'' is not quite right.)
-<<False Positive Experiment Setup>>=
-const size_t N = 1'000'000;
-const auto strings = create_strings(N*2, 10);
-const double desired_eps = 0.01;
-const double best_bits = -1.44 * std::log2(desired_eps);
-size_t m = N * best_bits;
-size_t k = size_t(-std::log2(desired_eps)) + 1;
-bloom_filter<std::string, string_hash> bf(m, k);
-@
-Note the small change that we generate $2N$ strings, not $N$.
-We'll put the first $N$ in our bloom filter, and then test the next $N$ and
-expect the Bloom filter to only report about $0.01=\epsilon$ to be in the set.
-<<False Positive Execution>>=
-std::for_each(std::begin(strings), std::begin(strings)+N,
-              [&bf](auto &s) { bf.set(s); });
+This is one experiment!
+<<Bloom Filter False Positive Rate>>=
+void false_positive_rate(void) {
+  auto total_strings = num_strings_in_set + num_strings_not_in_set;
+  if (verbosity_level >= 1) {
+    printf("total_strings: %d\n", total_strings);
+  }
+  const auto strings = create_strings(total_strings, length_of_strings);
+  if (verbosity_level >= 2) { printf("Done generating strings\n"); }
+  auto strings_in_set_end = std::begin(strings) + num_strings_in_set;
 
-auto false_positives = std::count_if(std::begin(strings)+N, std::end(strings),
-                                     [&bf](auto &v) { return bf.test(v); });
+  bloom_filter<std::string, string_hash> bf(m, k);
+  std::for_each(std::begin(strings), strings_in_set_end,
+                [&bf](auto &s) { bf.set(s); });
 
-double fp_rate = double(false_positives) /
-                 double(N);
-printf("false positive rate: %f\n", fp_rate);
-@
-
-<<falsepositiveexperiment.cpp>>=
-#include "bloomfilter.h"
-#include "datagen.h"
-#include "murmur/MurmurHash3.h"
-#include <algorithm>
-#include <cstdint>
-#include <cstdio>
-#include <iterator>
-#include <numeric>
-<<Hashing Function>>
-void experiment() {
-  <<False Positive Experiment Setup>>
-  <<False Positive Execution>>
+  auto false_positives = std::count_if(strings_in_set_end, std::end(strings),
+                                       [&bf](auto &v) { return bf.test(v); });
+  double fp_rate = double(false_positives) /
+                   double(num_strings_not_in_set);
+  printf("false positive rate: %f\n", fp_rate);
 }
-int main() { experiment(); }
 @
 
 \subsection{Accelerating A Set}
+
+<<Bloom Filter Application>>=
+void bloom_filter_application(void) {
+  auto total_strings = num_strings_in_set + num_strings_not_in_set;
+  if (verbosity_level >= 1) {
+    printf("total_strings: %d\n", total_strings);
+  }
+  const auto strings = create_strings(total_strings, length_of_strings);
+  if (verbosity_level >= 2) { printf("Done generating strings\n"); }
+  auto strings_in_set_end = std::begin(strings) + num_strings_in_set;
+  
+  std::set<std::string> base_set;
+  bloom_filtered_set<std::string, string_hash> filtered_set(m, k);
+  for (auto it = std::begin(strings); it != strings_in_set_end; it++) {
+    base_set.insert(*it);
+    filtered_set.add(*it);
+  }
+
+  auto to_test_begin = strings_in_set_end;
+  auto to_test_end = std::end(strings);
+  {
+    auto start = std::chrono::steady_clock::now();
+    size_t count = 0;
+    for (auto it = to_test_begin; it != to_test_end; it++) {
+      if (base_set.find(*it) != base_set.end()) {
+        count++;
+      }
+    }
+    auto end = std::chrono::steady_clock::now();
+    
+    std::chrono::duration<double> elapsed = end - start;
+    printf("Tested against base in time %fs\n", elapsed.count());
+  }
+  {
+    auto start = std::chrono::steady_clock::now();
+    size_t count = 0;
+    for (auto it = to_test_begin; it != to_test_end; it++) {
+      if (filtered_set.contains(*it)) {
+        count++;
+      }
+    }
+    auto end = std::chrono::steady_clock::now();
+
+    std::chrono::duration<double> elapsed = end - start;
+    printf("Tested against diff in time %fs\n", elapsed.count());
+  }
+}
+@
 We validate the filter-hit rate.
 We also do timing.
 The goal of this experiment is to build some confidence that a Bloom filter provides
 a benefit.
 
-Our experiment will time how long it takes to test set-membership for many elements
-that are all \emph{not} in the set.
-One set will be a standard [[std::set]], and the other will be our FILTERED SET.
-The C++ standard also provides a [[std::unordered_set]] object which is often much faster to use
-in these scenarios; using a [[std::set]] is to the Bloom filter's favor, then, but
-for our purposes that can serve to simulate a more ``expensive'' lookup that we're trying to avoid (such as hitting disk).
-
-The setup of our data is the same.
-We build our \emph{set} objects as follows.
-<<Experiment 3 Build Sets>>=
-std::set<std::string> base_set;
-bloom_filtered_set<std::string, string_hash> filtered_set(m, k);
-for (auto it = to_add_begin; it != to_add_end; it++) {
-  base_set.insert(*it);
-  filtered_set.add(*it);
-}
-@
-Note that implicit in the [[filtered_set]] object is the initialization
-of the Bloom filter that we did explicitly in our earlier experiments.
-
-And then all that's left is a similar battery of tests for our false-positive measurements.
-We have a huge collection of strings we know are \emph{not} in the set, and we simply time
-to see how long it takes to process those strings in each set.
-To get bigger (and hopefully more stable) numbers, we multiply our test loop by [[iter_count]] (which has the value 20, as it happens).
-
-<<Experiment 3 Measure Base>>=
-auto start = std::chrono::steady_clock::now();
-size_t count = 0;
-for (auto it = to_test_begin; it != to_test_end; it++) {
-  if (base_set.find(*it) != base_set.end()) {
-    count++;
-  }
-}
-auto end = std::chrono::steady_clock::now();
-
-std::chrono::duration<double> diff_time = end - start;
-std::cout << "Time to validate base " << count << "\t" << diff_time.count() << "s\n";
-@
-
-Other than the syntax for testing set-membership, measuring our filtered set is the same:
-<<Experiment 3 Measure Diff>>=
-auto start = std::chrono::steady_clock::now();
-size_t count = 0;
-for (auto it = to_test_begin; it != to_test_end; it++) {
-  if (filtered_set.contains(*it)) {
-    count++;
-  }
-}
-auto end = std::chrono::steady_clock::now();
-
-std::chrono::duration<double> diff_time = end - start;
-std::cout << "Time to validate diff " << count << "\t" << diff_time.count() << "s\n";
-@
-
-All that is left is piecing it together:
-
-<<setapplicationexperiment.cpp>>=
-#include "bloomfilterset.h"
-#include "datagen.h"
-#include "murmur/MurmurHash3.h"
-#include <algorithm>
-#include <cstdint>
-#include <cstdio>
-#include <iostream>
-#include <iterator>
-#include <chrono>
-#include <numeric>
-<<Hashing Function>>
-void experiment() {
-  const size_t N = 1'000'000;
-  const auto strings = create_strings(N*2, 10);
-  const double desired_eps = 0.01;
-  const double best_bits = -1.44 * std::log2(desired_eps);
-  size_t m = N * best_bits;
-  size_t k = size_t(-std::log2(desired_eps)) + 1;
-  
-  auto to_add_begin = std::begin(strings);
-  auto to_add_end = to_add_begin + N;
-  auto to_test_begin = to_add_end;
-  auto to_test_end = std::end(strings);
-
-  <<Experiment 3 Build Sets>>
-  {
-    <<Experiment 3 Measure Base>>
-  }
-  {
-    <<Experiment 3 Measure Diff>>
-  }
-}
-int main() { experiment(); }
-@
-
-\subsection{Constant Bit Size}
-One thing noted about Bloom filters is that we always need ``about'' 10 bits for \emph{any} value,
-even if that value is extremely large.
-<<bitcounttest.cpp>>=
-#include "bloomfilterset.h"
-#include "datagen.h"
-#include "murmur/MurmurHash3.h"
-#include <algorithm>
-#include <cstdint>
-#include <cstdio>
-#include <iostream>
-#include <iterator>
-#include <chrono>
-#include <numeric>
-<<Hashing Function>>
-void experiment() {
-  const size_t N = 100'000;
-  const auto strings = create_strings(N*2, 10'000);
-  const double desired_eps = 0.01;
-  const double best_bits = -1.44 * std::log2(desired_eps);
-  size_t m = N * best_bits;
-  size_t k = size_t(-std::log2(desired_eps)) + 1;
-  
-  auto to_add_begin = std::begin(strings);
-  auto to_add_end = to_add_begin + N;
-  auto to_test_begin = to_add_end;
-  auto to_test_end = std::end(strings);
-
-  <<Experiment 3 Build Sets>>
-  {
-    <<Experiment 3 Measure Base>>
-  }
-  {
-    <<Experiment 3 Measure Diff>>
-  }
-}
-int main() { experiment(); }
-@
-
-ANOTHER EXPERIMENT: THE REAL WORLD HAS, E.G., COMPILER OPTIMIZATIONS, and CODE BEHAVIOR CHANGES BASED ON THAT
 
 \section{Conclusion}
 Isn't this neat.
 \appendix
 \section{Complete Code Listings}
-\subsection{Bloom Filter (bloomfilter.h)}
+\subsection{Bloom Filter (bloomfilter.h)}\label{bloomfilterlisting}
 \inputminted{c++}{bloomfilter.h}
-\subsection{Density Experiment}
-\inputminted{c++}{experiment.cpp}
+\subsection{Bloom Filter (bloomfilter.h)}\label{bloomfiltersetlisting}
+\inputminted{c++}{bloomfilterset.h}
 \end{document}
 
 % Original paper:
