@@ -1,7 +1,7 @@
 SHELL=/bin/bash -o pipefail
 CC=clang
 CXX=clang++
-CXXFLAGS=-Wall -O2 -std=c++17 -g
+CXXFLAGS=-Wall -O2 -std=c++17 -g -flto
 
 files=$(shell for r in `noroots bloomfilter.nw | grep -v " "`; do echo $${r:2:-2}; done)
 
@@ -37,5 +37,5 @@ $(files): % : bloomfilter.nw
 	notangle -R$* $^ | cpif $@
 
 clean:
-	rm -r -f $(files) $(deps) $(progs) *~ *.o *.tex
+	rm -r -f $(files) $(deps) $(progs) *~ *.o
 	latexmk -pdf -shell-escape bloomfilter -CA

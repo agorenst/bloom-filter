@@ -239,7 +239,7 @@ public:
     filter.set(v);
     core_data.insert(v);
   }
-  int contains(const V &v) const {
+  bool contains(const V &v) const {
     if (!filter.test(v)) { return false; }
     return core_data.find(v) != core_data.end();
   }
@@ -624,29 +624,37 @@ double seconds;
 @
 
 <<Bloom Filter Application>>=
+#include <thread>
 void bloom_filter_application(void) {
   <<Set Up Application Comparison>>
+  size_t count = 0;
   {
-    timer_object t(&seconds);
-    size_t count = 0;
+    auto start = std::chrono::steady_clock::now();
     for (auto it = to_test_begin; it != to_test_end; it++) {
       if (base_set.find(*it) != base_set.end()) {
         count++;
       }
     }
+    auto end = std::chrono::steady_clock::now();
+    std::chrono::duration<double> elapsed = end - start;
+    printf("elapsed: %f for %d\n", elapsed.count(), count);
   }
-  printf("Tested against base in time %fs\n", seconds);
+  //printf("Tested against base in time %fs %zu\n", seconds, count);
 
+  seconds = 0;
+  count = 0;
   {
-    timer_object t(&seconds);
-    size_t count = 0;
+    auto start = std::chrono::steady_clock::now();
     for (auto it = to_test_begin; it != to_test_end; it++) {
       if (filtered_set.contains(*it)) {
         count++;
       }
     }
+    auto end = std::chrono::steady_clock::now();
+    std::chrono::duration<double> elapsed = end - start;
+    printf("elapsed: %f for %d\n", elapsed.count(), count);
   }
-  printf("Tested against diff in time %fs\n", seconds);
+  //printf("Tested against diff in time %fs %zu\n", seconds, count);
 }
 @
 
