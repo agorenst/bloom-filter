@@ -18,39 +18,29 @@
 \tableofcontents
 
 \section{Introduction}
-As a data structure to explore, Bloom filters\cite{bloom1970} seem to hit the ``sweet spot'' in a number of ways.
-\begin{enumerate}
-\item They're practical, and used in industry.
-\item They have many interesting extensions, e.g., 
-\item They are amenable to analysis, and indeed are literally a textbook example of some probabilistic technique-applications\cite{mitzenmacher2005probability}.
-\end{enumerate}
-Moreover, as we'll see, they \emph{readily} translate from an abstract, analysis-focused description
-to a (serviceable) real-world example.
+Formal computer science---including things like algorithms and data structures, computational complexity theory,
+as well as the more ``formal'' side of things like compilers, databases, and operating systems---is all just so fascinating.
+In an academic settings, i.e., textbooks and college courses, treatments of these topics typically focus on the underlying ideas to the exclusion of practical implementations.
+This is understandable: the \emph{insights} of computer science are independent of the programming language, operating system, or hardware (even as some of those insights greatly influence these things!),
+and there are only so many pages in a textbook, or lectures in a course.
 
-Most educational treatments of Bloom filters naturally focus on the mathematical analysis of their properties.
-Here we'll try to bridge the gap between theoretical treatments of Bloom filters and how they're realized in code.
-I would expect in this case, as in other topics, there is a still-further jump from a demonstrative implementation (as we'll develop here) and an ``industrial-strength'' one,
-so this is not the end of the story
+I think, however, such treatments would benefit from practical implementations of their ideas.
+This paper is the first in a hoped-for series that provides a stand-alone\footnote{In the sense that only a standard compiler and \emph{minimal} external dependencies are needed.},
+practical\footnote{In the sense that the code runs and, at least sometimes, exhibits its purported behavior.}, and approachable\footnote{In the sense that, with the accompanying text, readers will find the code completely comprehensible.}
+implementation of a ``textbook'' algorithm.
 
-Theoretical treatments typically present their code with psuedocode, which is understandable: it makes it easier to focus on the qualities that dictate the formal analysis.
-The gap we will try to jump is not ``just'' psuedocode.
-Motivation for any data structure or algorithm comes from its applications, and I have personally seen most treatments be content with a few prose sentences.
-This is to those treatments' detriments, in my opinion.
-Seeing a full, running example of (in this case) how a Bloom filter can be used to speed up set membership tests, that helped build
-conceptual ``hooks'' in my mind on which I could attach the more fundamental concepts of them.
-I will say more about this as we get there in \cref{sec:application}.
-
-The rest of this document will follow this structure:
+Herein, we will discuss Bloom filters, introduced\cite{bloom1970} over 50 years ago and still going strong.
+From the perspective that this document is to \emph{supplement} existing textbook discussions (usually in specialized algorithms textbooks\cite{mitzenmacher2005probability}),
+we will jump as quickly as possible into a concrete implementation.
+The rest of the document is as follows:
 \begin{itemize}
-\item In \cref{sec:theorytocode} we'll present our demonstrative C++ implementation of a bloom filter.
-The one implementation detail we will \emph{not} drill into is the hashing scheme; we need a collection $h_i$ of hash fucntions,
-and we'll do so using MurmurHash3.
-\item In \cref{sec:application} we'll build a Bloom-filter-enhanced container in C++, and list out some expectations of what we'd if the Bloom filter helps us as we'd want.
-\item In OTHER SECTION we'll \emph{apply} the analytical results
+\item In \cref{sec:theorytocode} we will provide a complete implementation of a Bloom filter in standard C++17.
+\item In \cref{sec:harnesscode} we will provide a stand-alone ``driver'' program that can take command-line parameters and actually execute code using the Bloom filter, so that we might
+examine the behavior of our implementation in a real environment.
+\item Finally, in \cref{sec:experiments}, we will present some findings and thoughts based on using that driver.
 \end{itemize}
-List out each section and what we'll get out of them.
-One thing intentionally missing from this treatment is an introductory description of what a Bloom filter \emph{is}.
-For that I can only recommend online resources or books\cite{mitzenmacher2005probability}.
+Along the way we will have brief interludes discussing how our practical work and findings complements academic treatments, for the learner.
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -59,9 +49,12 @@ For that I can only recommend online resources or books\cite{mitzenmacher2005pro
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-We will move from 
-As described in our reference, we want a length-$n$ sequence $A$ of bits.
+This section ``reads along'' with a textbook description of Bloom filters\cite{mitzenmacher2005probability},
+and derives code from the prose.
+
+To begin, as described in our reference, we want a length-$n$ sequence $A$ of bits.
 We additionally specify $k$ hash-functions.
+This is the entirety of the state of our Bloom filter, so we can write:
 \subsection{Bloom Filter Implementation}
 <<Bloom filter state and construction>>=
 private:
@@ -75,7 +68,7 @@ public:
 The field [[A]] is the core sequence of bits.
 When we talk about ``setting'' or ``checking'' bits, we are referencing [[A]].
 The parameter [[n]] is the number of bits we'll be using in our sequence.
-Finally, [[k]] is the number of bits we set for each value.
+Finally, [[k]] is the number of bits we set for each value we insert, i.e., the number of hash functions we need.
 
 As an implementation detail, the type of our container, as well as its hashing scheme,
 are passed as \emph{template} parameters.
@@ -84,17 +77,25 @@ template <class V, size_t (*h)(uint32_t i, const V &)>
 @
 Given the C++ type system and its model of containers in its standard library,
 this seems like the appropriate way to specify this.
-Here already we have something of an extra hurdle from theoretical descriptions: we have to make sure our implementation plays nicely with our programming language's type system!
+
+\paragraph{Interlude: Theory To Practice}
+What are some more ways we might specify the hash functions for our Bloom filter?
+Observe that our implementation very directly maps to the prose: we expect the hash function to look something like [[h(i, v)]], where [[v]] is the value we want to hash, and [[i]] indicates that we should use the $i$-th hash function.
+An alternative implementation might be one where we have a single hash function, and the Bloom filter extends that to create multiple hash functions.
+Additionally, we're using a very C++-specific feature of \emph{templates}.
+The effect is that the function-pointer provided is going to be a compile-time constant, sparing us a likely-very-expensive indirect call.
+An alternative would be to provide the hashing function at runtime, which (modulo very sophisticated compiler optimizations) would indeed induce an indirect call.
+A separate practical consideration is our negotiating with our language's type-system, another detail frequently (understandably!) elided in typical academic introductions.
 
 With our parameters, and how they're set in our object, defined, we can turn to the key functionality:
-how do we add elements to our filter, and how do we test if an element was added to our filter?
-For these two operations we'll map the theoretical prose into code.
-These are all from \cite{mitzenmacher2005probability}.
+How do we add elements to our filter, and how do we test if an element was added to our filter?
+For both operations we will consider a quote from our reference, and then map that to code.
+Happily, at this point we will find the mapping very straightforward.
 
 \paragraph{Adding Elements}
 \begin{quote}
 For each element $s\in S$, the bits $A[h_i(s)]$ are set to 1 for $1\leq i \leq k$.
-A bit location can be set to 1 multiple times, but only the first change has an effect.
+A bit location can be set to 1 multiple times, but only the first change has an effect.\cite[109]{mitzenmacher2005probability}.
 \end{quote}
 <<Bloom filter set>>=
 void set(const V &s) {
@@ -108,7 +109,7 @@ void set(const V &s) {
 \begin{quote}
 To check if an element $x$ is in $S$, we check whether all array locations $A[h_i(x)]$
 for $1 \leq i \leq k$ are set to 1. If not, then clearly $x$ is not a member of $S$,\ldots.
-If all $A[h_i(x)]$ are set to 1, we assume $x$ is in $S$, although we could be wrong.
+If all $A[h_i(x)]$ are set to 1, we assume $x$ is in $S$, although we could be wrong.\cite[109]{mitzenmacher2005probability}.
 \end{quote}
 <<Bloom filter test>>=
 bool test(const V &s) const {
@@ -120,11 +121,8 @@ bool test(const V &s) const {
   return true;
 }
 @
-Note on application: the filter is distinct from the set!
-We're inclined to model the bloom filter as an object, as we do here, but the psuedocode just talks about $A$.
 
-\paragraph{Tying it together}
-This completes the core of our implementation.
+For our demonstrative implementation, that is all we need! This completes the core of our implementation.
 We can wrap these up in a stand-alone C++ header defining this object, like so:
 <<bloomfilter.h>>=
 #pragma once
@@ -139,8 +137,9 @@ class bloom_filter {
   int count() const { return A.count(); }
 };
 @
+(We haven't mentioned the [[count]] method written above. That counts the number of bits-set-to-1, i.e., some value $c <= n$, and will be used in later experiments.)
 
-We are not quite done with our implementation.
+There are still a few loose ends.
 Two things remain:
 \begin{enumerate}
 \item Implementing our array-of-bits [[simple_bit_set]]
@@ -151,7 +150,7 @@ We will address these in turn.
 
 \subsection{Array of Bits}
 Some languages have this built in already.
-The language C++ has it, but not really, so we do this:
+The standard C++ libraries provide a \emph{fixed-length} (at compile time) bit-array, but combining it with the dynamically-resizable [[std::vector]] container leads to a natural implementation:
 <<simplebitset.h>>=
 #pragma once
 #include <bitset>
@@ -159,31 +158,39 @@ The language C++ has it, but not really, so we do this:
 #include <vector>
 class simple_bit_set {
 private:
-  static const int pageSize = 64;
-  typedef std::bitset<pageSize> page;
+  static const int page_size = 64;
+  typedef std::bitset<page_size> page;
   std::vector<page> data;
 
 public:
-  simple_bit_set(const int size) : data((size / pageSize) + 1, 0) {}
+  simple_bit_set(const int size) : data((size / page_size) + 1, 0) {}
   bool test(unsigned int i) const {
-    return data[(i / pageSize)].test(i % pageSize);
+    return data[(i / page_size)].test(i % page_size);
   }
-  void set(unsigned int i) { data[(i / pageSize)].set(i % pageSize); }
+  void set(unsigned int i) {
+    data[(i / page_size)].set(i % page_size);
+  }
+  int size() const { return data.size() * page_size; }
   int count() const {
     int r = 0;
     for (const auto& p : data) { r += p.count(); }
     return r;
   }
-  int size() const { return data.size() * pageSize; }
 };
 @
+The one ``trick'' that may be new to implementors is how we ``translate'' [[i]] first into which 64-bit [[page]] to look up, and then look up the right bit within that page.
+We can also drill into another detail: the number of bits we set will always be some multiple of [[page_size]].
+Consequently, we may sometimes have slightly more bits than our Bloom filter expects.
+This isn't anticipated to appreciably change the performance or even the analysis, but another example of a ``rough edge'' between theory and practice.
 
-\subsection{Hashing Scheme}
-We use murmur3!
-Something I'm interested in: a nice \emph{theory} of a hashing algorithm.
-There are great empirical results that this is a good hashing algorithm.
-What explains that performance?
+\subsection{Hashing Scheme and Values to Hash}
+We need a so-called ``good'' hash for our Bloom filter.
+Hashing algorithms are a whole field into themselves, and one I hope to explore later.
+For now, we will defer to what I hear is established as ``good practice'' and use the public-domain MurmurHash3 algorithm\cite{murmur3}.
+This is understood to be an extremely fast and good hash, without the overhead of cryptographic guarantees.
+It provides a simple C-header interface, and most conveniently provides a ``seed'' parameter that maps to the $i$ in $h_i$.
 
+Here is our explicit hashing function:
 <<Hashing Function>>=
 size_t string_hash(uint32_t i, const std::string &v) {
   uint32_t hash;
@@ -191,39 +198,47 @@ size_t string_hash(uint32_t i, const std::string &v) {
   return static_cast<size_t>(hash);
 }
 @
+Note that implicit in our implementation is that we've also picked our type [[V]]: we'll be hashing a collection of [[std::string]]s.
+For our type system, generally, we'd want to have a hash function implemented ``in tandem'' with our value-type.
+This is so that it knows how to look at the whole value.
+In this case, a [[std::string]] value is actually a small object holding data like the length, and a \emph{pointer} to the ``real'' content of the string.\footnote{
+  In practice things are actually even a bit more complicated for [[std::string]], where sometimes due to the so-called ``short-string optimization'' there isn't a pointer in use!
+}
+We should hash the \emph{contents} of the pointer rather than the \emph{value} of the pointer.
+To hash the values would be a bug:
+In the case where we have two copies of the same string, their underlying bytes may exist in different memory locations so a naive hash would say they're \emph{different}, but we need them to be reported the same!
+So our [[string_hash]] implementation takes care of telling our underlying hash algorithm which data to look at, and how, for hashing.
 
-\section{Bloom Filter Application}\label{sec:application}
-At this point, we've essentially emulated the typical introduction to a Bloom filter\cite{mitzenmacher2005probability}.
+\paragraph{Interlude: Practical Considerations in Code}
+Domain and casting, TODO, write about that.
 
+\paragraph{Personal Interlude} More than once in my career a colleague has said ``we need a hashing algorithm that provides good guarantees. Let's use SHA!''
+In a sense, I agree: the properties promised by \emph{cryptographic} hashing functions are very nice.
+My background in computational complexity reminds me always that features (usually) have a price---in this case, CPU time.
+When we just want to get a nice hashing algorithm for some in-memory object, we typically don't need to worry about hackers trying to, given the hash result, figure out the actual value!
 
-Let's demonstrate 
-<<bloomfilterset.h>>=
-#pragma once
-#include "bloomfilter.h"
-#include <set>
-template <class V, size_t (*F)(uint32_t, const V &)>
-class bloom_filtered_set {
-  std::set<V> core_data;
-  bloom_filter<V, F> filter;
+This completes all the components of our implementation.
 
-public:
-  bloom_filtered_set(size_t size, size_t k) : filter(size, k) {}
-  void add(const V &v) {
-    filter.set(v);
-    core_data.insert(v);
-  }
-  bool contains(const V &v) const {
-    if (!filter.test(v)) { return false; }
-    return core_data.find(v) != core_data.end();
-  }
-};
-@
+\section{Harnessing the Code}\label{sec:harnesscode}
+Now we have a complete implementation of a Bloom filter.
+We expect to be able to use it in C++ with code like [[bloom_filter<std::string, string_hash> bf(m, k)]].
+That creates a Bloom filter [[bf]] to which we can add [[std::string]]-typed values, and later test if they were (likely) included.
+Our goal is to actually exercise this code. For that, we need:
+\begin{enumerate}
+\item A way to find or create strings to add to the Bloom filter.
+\item A way to find or create (possibly different) strings to test-membership-of in the Bloom filter.
+\item A way to observe expected properties of a Bloom filter: namely its false-positive rate and its bit-density.
+\item A way to compare the application of a Bloom filter and see if its use saves time.
+\end{enumerate}
+And possibly more!
 
-\section{Empirical Validation}\label{sec:empvalidation}
+We will find that writing the supporting code for this application is maybe not as conceptually sophisticated as the \emph{ideas} behind a Bloom filter,
+but is nonetheless nontrivial and affords opportunities for good---and bad---design.
+
+In the following subsections we'll fill out a piece of software, a \emph{driver}, that provides a command-line interface to run various Bloom filter experiments.
+
 \subsection{Creating Data}
-We need resources by which we can run our experiments.
-In this case, we need a large set of strings to populate our bloom filter,
-and then a collection of strings that may (or may not) be in the set.
+First, we need strings.
 We can find real-world datasets, but for our purposes we can ``just'' generate random strings.
 
 Let's model our need for random strings as a generator:
@@ -238,7 +253,9 @@ public:
 };
 @
 
-There are a lot of particulars about the [[std]] machinery used here that we won't get in to.
+Random number generators are yet-again another field into themselves that again I hope to explore later.
+In keeping with our theme, there are a lot of particulars mapping the concepts of RNG (random number generation)
+to C++ code, but for this writeup we won't get into them.
 For our purposes, we're just using them as a ``black box'' to get a nice selection of random strings expediently.
 
 Explicitly, we can get random strings like:
@@ -262,14 +279,9 @@ std::string string_generator::operator()(size_t len) {
 The [[letter_set]] collection is just a way to, in case if it's needed, ensure our
 random strings are easily human-readable.
 The constructor essentially handles the random-number-generator-initialization.
-Finally, the [[operator()]] method is how we get our string.
+Finally, the [[operator()]] method is how we get our string: we give it a [[len]] parameter, and it generates a string with that many characters drawn uniformly at random from our letter-set.
 
-How is this generator used?
-Our intention is to create a collection of random strings.
-For expedience and conceptual simplicity, what we'll do is use our generator as much as we
-need to generate random strings, and add them to a set.
-In this way, when our set (which will implicitly exclude any duplicates!) will end up
-with the number of strings we asked for.
+The following code and explanation shows how we use this underlying generator:
 <<Creating Strings with the Generator>>=
 std::vector<std::string> create_strings(size_t count, size_t len) {
   std::unordered_set<std::string> unique_strings;
@@ -282,9 +294,12 @@ std::vector<std::string> create_strings(size_t count, size_t len) {
   return data;
 }
 @
+Our intention is to create a collection of random strings, and moreover \emph{distinct} random strings.
+An expedient way to guarantee distinctness is to add generated strings to a set until the size of the set is the desired amount.
+So long as we know there are enough possible strings (i.e., that [[len]] is big enough relative to [[count]]) we'll succeed.
+In our case, this will be fast-enough, though I'm sure there are much better ways of doing this.
 
-So we have our generator package all set up:
-
+We can wrap these code samples up into a small software package to link into our driver.
 <<datagen.h>>=
 #include <random>
 #include <string>
@@ -302,7 +317,7 @@ std::vector<std::string> create_strings(size_t count, size_t len);
 @
 
 \subsection{Experiment Driver}
-We can understand our previous code (\cref{bloomfilter.h, bloomfilterset.h}) as creating a library.
+Recall that we can understand our previous code (\cref{bloomfilter.h}) as creating a library.
 In general one does not really ``run'' a library; it only makes sense to run the code as part of a larger piece of software.
 This is reflecting mechanically in our C++ code by the fact that none of our code so far has a [[main]] function.
 
@@ -312,7 +327,6 @@ Code-compilers typically operate in this way, most notably LLVM makes that very 
 
 The code we'll implement for our experiments will not quite be an all-purpose driver, but is influenced by that mindset.
 The overall design is outlined in \cref{driver.cpp}.
-
 <<driver.cpp>>=
 <<Driver Headers>>
 <<Bloom Filter Settings>>
@@ -325,8 +339,152 @@ int main(int argc, char* argv[]) {
   <<Run Selected Experiments>>
 }
 @
+\paragraph{High-Level Driver Design}
+From an executable perspective, our driver will read first commmand-line parameters (\cref{Read Command-Line Parameters}),
+and then use those to set our experiment-state (\cref{Bloom Filter Settings}).
+Some of those parameters set which experiments we'd like to run.
+Those experiments are defined in \cref{Possible Bloom Filter Experiments}, and (after error-checking our parameters in \cref{Error-Check Parameters}),
+the driver ``just'' runs those experiments and terminates.
 
-Here are all the settings we'd need for any experiment:
+In the following sections we'll describe each of our desired experiments.
+As we build the understanding of what experiments we'd like to run, that understanding will inform the settings we need, and then the parsing and error-checking.
+In that way we'll ``work backwards'' from our goal (run interesting experiments), and only at the end get into the implementation detail of the driver.
+
+\subsection{Compute Expected Density of Optimal Bloom Filter}
+As mentioned in our motivating textbook\cite[111]{mitzenmacher2005probability}, an interesting property of an ``optimal'' Bloom filter
+is that its density (the proportion of bits set to $1$) should approach $0.5$.
+This touches on the complicated question of what is ``optimal'', but for our purposes:
+Given a size $N$ collection of strings to hash and desired false-positive rate $\epsilon$, we should be able to determine a ``best'' number-of-bits $m$ and number-of-hashes $k$.
+This optimality will be in part reflected by that density.
+
+So let's enable our driver to compute the density of a Bloom filter!
+Here's the code:
+<<Bloom Filter Optimal Density>>=
+void optimal_density(void) {
+  const auto strings = create_strings(num_strings_in_set, length_of_strings);
+  if (verbosity_level >= 2) { printf("Done generating strings\n"); }
+
+  bloom_filter<std::string, string_hash> bf(num_bits_in_filter, num_hash_functions);
+  for (auto& s : strings) {
+    bf.set(s);
+  }
+  const double density =
+    static_cast<double>(bf.count()) / static_cast<double>(num_bits_in_filter);
+  printf("bloom filter density: %f\n", density);
+}
+@
+Each line of code maps to a fairly straightforward idea for our experiment:
+We create a [[num_strings_in_set]]-sized collection of distinct strings, each of length [[length_of_strings]].
+Then with the [[for]] loop we build our Bloom filter, having initialized it with [[num_bits_in_filter]]-many-bits (all starting at 0 of course), and [[num_hash_functions]] hash-functions.
+Having built our Bloom filter, we need ``only'' compare the bits that are set to 1 (via [[count]]) to the total number of bits.
+This would complete our experiment run!
+
+\subsection{Bloom Filter False Positivity}
+This is one experiment!
+<<Bloom Filter False Positive Rate>>=
+void false_positive_rate(void) {
+  auto total_strings = num_strings_in_set + num_strings_not_in_set;
+  if (verbosity_level >= 1) {
+    printf("total_strings: %d\n", total_strings);
+  }
+  const auto strings = create_strings(total_strings, length_of_strings);
+  if (verbosity_level >= 2) {
+    printf("Done generating strings\n");
+  }
+  auto strings_in_set_end = std::begin(strings) + num_strings_in_set;
+
+  bloom_filter<std::string, string_hash> bf(num_bits_in_filter,
+                                            num_hash_functions);
+  std::for_each(std::begin(strings), strings_in_set_end,
+                [&bf](auto &s) { bf.set(s); });
+
+  auto false_positives = std::count_if(strings_in_set_end, std::end(strings),
+                                       [&bf](auto &v) { return bf.test(v); });
+  double fp_rate = double(false_positives) / double(num_strings_not_in_set);
+  printf("false positive rate: %f\n", fp_rate);
+}
+@
+
+\subsection{Accelerating A Set}
+We want to time our function.
+We can be a little funny and use C++'s RAII thing.
+<<Timer Object>>=
+class timer_object {
+  std::chrono::time_point<std::chrono::steady_clock> start;
+  double* elapsed_seconds;
+public:
+  timer_object(double* elapsed_seconds) {
+    this->elapsed_seconds = elapsed_seconds;
+    start = std::chrono::steady_clock::now();
+  }
+  ~timer_object() {
+    auto end = std::chrono::steady_clock::now();
+    std::chrono::duration<double> elapsed = end - start;
+    *elapsed_seconds = elapsed.count();
+  }
+};
+@
+
+We need to set up our two sets to compare:
+<<Set Up Application Comparison>>=
+auto total_strings = num_strings_in_set + num_strings_not_in_set;
+if (verbosity_level >= 1) {
+  printf("total_strings: %d\n", total_strings);
+}
+const auto strings = create_strings(total_strings, length_of_strings);
+if (verbosity_level >= 2) { printf("Done generating strings\n"); }
+auto strings_in_set_end = std::begin(strings) + num_strings_in_set;
+
+std::set<std::string> base_set;
+bloom_filter<std::string, string_hash> bf(num_bits_in_filter, num_hash_functions);
+for (auto it = std::begin(strings); it != strings_in_set_end; it++) {
+  base_set.insert(*it);
+  bf.set(*it);
+}
+
+auto to_test_begin = strings_in_set_end;
+auto to_test_end = std::end(strings);
+@
+
+<<Bloom Filter Application>>=
+#include <thread>
+void bloom_filter_application(void) {
+  <<Set Up Application Comparison>>
+  double seconds = 0;
+  size_t count = 0;
+  {
+    timer_object t(&seconds);
+    for (auto it = to_test_begin; it != to_test_end; it++) {
+      if (base_set.find(*it) != base_set.end()) {
+        count++;
+      }
+    }
+  }
+  printf("Tested against base in time %fs %zu\n", seconds, count);
+
+  seconds = 0;
+  count = 0;
+  {
+    timer_object t(&seconds);
+    for (auto it = to_test_begin; it != to_test_end; it++) {
+      if (bf.test(*it)) {
+        if (base_set.find(*it) != base_set.end()) {
+          count++;
+        }
+      }
+    }
+  }
+  printf("Tested against diff in time %fs %zu\n", seconds, count);
+}
+@
+
+The goal of this experiment is to build some confidence that a Bloom filter provides
+a benefit.
+
+
+\subsection{Driver Plumbing}
+Let's begin to dive into those chunks more explicitly.
+The various settings we need for our experiments are listed out below.
 <<Bloom Filter Settings>>=
 double desired_epsilon = 0.0;
 int num_strings_in_set = 0;
@@ -345,6 +503,8 @@ bool run_density_experiment = false;
 bool run_false_positive_experiment = false;
 bool run_application_experiment = false;
 @
+These parameter
+
 We set those settings through command-line parsing:
 <<Read Command-Line Parameters>>=
 int c;
@@ -453,13 +613,13 @@ if (run_application_experiment) {
 
 <<Driver Headers>>=
 #include <algorithm>
-#include <unistd.h>
-#include <cstdlib>
-#include <cstdio>
-#include <cmath>
 #include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <set>
 #include <string>
+#include <unistd.h>
 
 #include <iostream>
 
@@ -494,142 +654,27 @@ At this point, we have our analytical results, our Bloom filter implementation,
 and a means to exercise that Bloom filter.
 Let's get some empirical results!
 
-\subsection{Compute Expected Density of Optimal Bloom Filter}
-Here is the code that we want to run:
-<<Bloom Filter Optimal Density>>=
-void optimal_density(void) {
-  const auto strings = create_strings(num_strings_in_set, length_of_strings);
-  if (verbosity_level >= 2) { printf("Done generating strings\n"); }
-
-  bloom_filter<std::string, string_hash> bf(num_bits_in_filter, num_hash_functions);
-  for (auto& s : strings) {
-    bf.set(s);
-  }
-  const double density =
-    static_cast<double>(bf.count()) / static_cast<double>(bf.n);
-  printf("bloom filter density: %f\n", density);
-}
-@
-See the Makefile for stuff
-
-\subsection{Bloom Filter False Positivity}
-This is one experiment!
-<<Bloom Filter False Positive Rate>>=
-void false_positive_rate(void) {
-  auto total_strings = num_strings_in_set + num_strings_not_in_set;
-  if (verbosity_level >= 1) {
-    printf("total_strings: %d\n", total_strings);
-  }
-  const auto strings = create_strings(total_strings, length_of_strings);
-  if (verbosity_level >= 2) { printf("Done generating strings\n"); }
-  auto strings_in_set_end = std::begin(strings) + num_strings_in_set;
-
-  bloom_filter<std::string, string_hash> bf(num_bits_in_filter, num_hash_functions);
-  std::for_each(std::begin(strings), strings_in_set_end,
-                [&bf](auto &s) { bf.set(s); });
-
-  auto false_positives = std::count_if(strings_in_set_end, std::end(strings),
-                                       [&bf](auto &v) { return bf.test(v); });
-  double fp_rate = double(false_positives) /
-                   double(num_strings_not_in_set);
-  printf("false positive rate: %f\n", fp_rate);
-}
-@
-
-\subsection{Accelerating A Set}
-We want to time our function.
-We can be a little funny and use C++'s RAII thing.
-<<Timer Object>>=
-class timer_object {
-  std::chrono::time_point<std::chrono::steady_clock> start;
-  double* elapsed_seconds;
-public:
-  timer_object(double* elapsed_seconds) {
-    this->elapsed_seconds = elapsed_seconds;
-    start = std::chrono::steady_clock::now();
-  }
-  ~timer_object() {
-    auto end = std::chrono::steady_clock::now();
-    std::chrono::duration<double> elapsed = end - start;
-    *elapsed_seconds = elapsed.count();
-  }
-};
-@
-
-We need to set up our two sets to compare:
-<<Set Up Application Comparison>>=
-auto total_strings = num_strings_in_set + num_strings_not_in_set;
-if (verbosity_level >= 1) {
-  printf("total_strings: %d\n", total_strings);
-}
-const auto strings = create_strings(total_strings, length_of_strings);
-if (verbosity_level >= 2) { printf("Done generating strings\n"); }
-auto strings_in_set_end = std::begin(strings) + num_strings_in_set;
-
-std::set<std::string> base_set;
-bloom_filter<std::string, string_hash> bf(num_bits_in_filter, num_hash_functions);
-for (auto it = std::begin(strings); it != strings_in_set_end; it++) {
-  base_set.insert(*it);
-  bf.set(*it);
-}
-
-auto to_test_begin = strings_in_set_end;
-auto to_test_end = std::end(strings);
-double seconds;
-@
-
-<<Bloom Filter Application>>=
-#include <thread>
-void bloom_filter_application(void) {
-  <<Set Up Application Comparison>>
-  size_t count = 0;
-  {
-    auto start = std::chrono::steady_clock::now();
-    for (auto it = to_test_begin; it != to_test_end; it++) {
-      if (base_set.find(*it) != base_set.end()) {
-        count++;
-      }
-    }
-    auto end = std::chrono::steady_clock::now();
-    std::chrono::duration<double> elapsed = end - start;
-    printf("elapsed: %f for %d\n", elapsed.count(), count);
-  }
-  //printf("Tested against base in time %fs %zu\n", seconds, count);
-
-  seconds = 0;
-  count = 0;
-  {
-    auto start = std::chrono::steady_clock::now();
-    for (auto it = to_test_begin; it != to_test_end; it++) {
-      if (bf.test(*it)) {
-        if (base_set.find(*it) != base_set.end()) {
-          count++;
-        }
-      }
-    }
-    auto end = std::chrono::steady_clock::now();
-    std::chrono::duration<double> elapsed = end - start;
-    printf("elapsed: %f for %d\n", elapsed.count(), count);
-  }
-  //printf("Tested against diff in time %fs %zu\n", seconds, count);
-}
-@
-
-The goal of this experiment is to build some confidence that a Bloom filter provides
-a benefit.
-
-
-\section{Conclusion}
-Isn't this neat.
+\section{Experiments}\label{sec:experiments}
+\subsection{Optimal Parameters Bit-Density}
+\subsubsection{Variance}
+\subsection{Non-Optimal Parameters Bit-Density}
+\subsection{Specifying Epsilon}
+Explore how number-of-bits needed for set-size relates to hash function
+\subsection{Measuring Set Acceleration}
+\subsubsection{Optimal Parameters}
+\paragraph{Failure Modes}
+\subsubsection{Non-Optimal Parameters}
 \appendix
 \section{Library Code Listings}
 \subsection{Bloom Filter (bloomfilter.h)}\label{bloomfilterlisting}
-\inputminted{c++}{bloomfilter.h}
-\subsection{Bloom Filter Set (bloomfilterset.h)}\label{bloomfiltersetlisting}
-\inputminted{c++}{bloomfilterset.h}
+\subsection{Simple Bit Set (simplebitset.h)}\label{simplebitsetlisting}
+\inputminted{c++}{simplebitset.h}
 \section{Driver Code Listings}
 \subsection{Main Driver}
 \inputminted{c++}{driver.cpp}
+\subsection{Generating Data}
+\inputminted{c++}{datagen.h}
+\inputminted{c++}{datagen.cpp}
 \end{document}
 
 % Original paper:
