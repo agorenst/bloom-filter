@@ -52,33 +52,6 @@ List out each section and what we'll get out of them.
 One thing intentionally missing from this treatment is an introductory description of what a Bloom filter \emph{is}.
 For that I can only recommend online resources or books\cite{mitzenmacher2005probability}.
 
-% ++++++++++++++++++++++++
-% 
-% Bloom filters seem to hit just the ``sweet spot'' for interesting data structures.
-% They were introduced decades ago\cite{bloom1970}, and are a practical data structure, still in use today.
-% They are interesting: they are a probabilistic data structure, and exhibit a curious behavior (false-positives) that mean they only have certain applications.
-% Their expected performance is amenable to analysis, but not trivial (at least for me).
-% They are extensible; a great many variaties exist.
-% Lastly, they are simple, in the sense that they can be easily implemented, and consequently explored empirically.
-% 
-% It is all of these, but especially the last part on implementation, that motivates this work.
-% Here we will implement, using only standard C++, a basic Bloom filter. This includes:
-% \begin{enumerate}
-% \item Its core implementation and helper objects
-% \item Experiments validating its behavior as predicted by mathematical analysis
-% \item Experiments validating its expected benefit in a demonstrative application
-% \end{enumerate}
-% What we will \emph{not} do is introduce what a Bloom filter is, we trust you're already familiar.
-% We will also \emph{not} include any analysis of the hashing algorithm we will use.
-% Finally, the above-mentioned experiments will also be suitably humble in scope.
-
-% The expected benefit of this work is to equip others to ``follow along'' and take the code further,
-% and moreover to show that we can---and should more often!---jump the bridge between theory and implementation.
-% Without further ado we can jump into implementing Bloom filters.
-% 
-% Let's explore how to map a general description, in this case the one from a standard textbook\cite{mitzenmacher2005probability},
-% and see how it maps to code.
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -246,24 +219,6 @@ public:
 };
 @
 
-\section{Using Analytical Results}
-Most treatments\cite{mitzenmacher2005probability,bloom1970} spend time on how to derive the analytical results.
-This document is meant to complement those by providing some empirical demonstrations.
-We will not spend time deriving the analytical results, but will instead ``just'' demonstrate how to plug in those results to use a Bloom filter effectively.
-The analytical results inform the parameters $k$ and $n$, basically.
-
-When we use a bloom filter, we care about the \emph{size} of the filter, and its \emph{false-positive} rate.
-The size is ``just'' the size of the explicit object, the same $n$ that says how big [[simple_bit_set]] is.
-The false-positive rate is more dynamic: it is the ratio of EXPRESS IN TERMS OF CODE, [[filter_hit]] AND SUCH.
-
-We can set $n$ directly, of course, and the other parameter we have is $k$.
-We also want an estimate of the \emph{final} size of our set $m$.
-(This $m$ is the number of elements that ultimately end up in [[core_data]].)
-This introduction of $m$ implies something subtle: many times in code we use set-data-structures to add and remove elements frequently.
-A Bloom filter is geared towards summarizing a \emph{read-only-set}---the collection of data we care about already exists and is fixed, and we do a one-time generation.
-DRILL INTO THIS MORE, MAYBE IN ANOTHER SECTION (EARLIER?). DIFFERENCE BETWEEN THEORY AND PRACTICE, THEY LEAVE THESE APPLICATION RESTRICTIONS IMPICIT.
-
-So in that spirit, let's fix $m$. As we'll
 \section{Empirical Validation}\label{sec:empvalidation}
 \subsection{Creating Data}
 We need resources by which we can run our experiments.
@@ -612,10 +567,10 @@ if (verbosity_level >= 2) { printf("Done generating strings\n"); }
 auto strings_in_set_end = std::begin(strings) + num_strings_in_set;
 
 std::set<std::string> base_set;
-bloom_filtered_set<std::string, string_hash> filtered_set(num_bits_per_value, num_hash_functions);
+bloom_filter<std::string, string_hash> bf(num_bits_in_filter, num_hash_functions);
 for (auto it = std::begin(strings); it != strings_in_set_end; it++) {
   base_set.insert(*it);
-  filtered_set.add(*it);
+  bf.set(*it);
 }
 
 auto to_test_begin = strings_in_set_end;
@@ -646,8 +601,10 @@ void bloom_filter_application(void) {
   {
     auto start = std::chrono::steady_clock::now();
     for (auto it = to_test_begin; it != to_test_end; it++) {
-      if (filtered_set.contains(*it)) {
-        count++;
+      if (bf.test(*it)) {
+        if (base_set.find(*it) != base_set.end()) {
+          count++;
+        }
       }
     }
     auto end = std::chrono::steady_clock::now();
