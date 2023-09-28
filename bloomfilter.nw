@@ -3,6 +3,7 @@
 \title{Bloom Filter Implementation}
 \date{\today}
 
+\usepackage{graphicx}
 \usepackage{hyperref}
 \usepackage{noweb}
 \usepackage{cleveref}
@@ -371,7 +372,7 @@ void optimal_density(void) {
   }
   const double density =
     static_cast<double>(bf.count()) / static_cast<double>(num_bits_in_filter);
-  printf("bloom filter density: %f, drift from 0.5: %f\n", density, std::fabs(0.5-density));
+  printf("%f\n", density);
 }
 @
 Each line of code maps to a fairly straightforward idea for our experiment:
@@ -499,7 +500,7 @@ int verbosity_level = 0;
 size_t num_hash_functions = 0;
 double num_bits_per_value = 0.0;
 size_t num_bits_in_filter = 0;
-  
+
 bool run_density_experiment = false;
 bool run_false_positive_experiment = false;
 bool run_application_experiment = false;
@@ -677,12 +678,41 @@ What do we see here?
 ./driver -v 1 -d -e 0.05 -n 100000 -l 24
 ./driver -v 1 -d -e 0.05 -n 100000 -l 24 -r
 @
+
+% TODO: format this as something markdown-printable?
 <<bitdensity.sh>>=
 #!/bin/bash
 <<Experiment: Bit-Density>>
 <<Experiment: Bit-Density with Rounding>>
 @
+\begin{itemize}
+\item The density is (largely) parameterized on the number of hash functions.
+\item We round down by default, and [[-r]] changes that to round-up. It changes the drift one way or the other; that's interesting.
+Suggests a practical optimization step, though not a huge one.
+\item The density is largely independent of most other parameters: it's really only the hash function count.
+So let's change the hash function count:
+\end{itemize}
 \subsection{Non-Optimal Parameters Bit-Density}
+This invites us to consider how much it matters to have the ``wrong'' number of hash functions.
+<<plot-density-per-hash.sh>>=
+for hash_count in {1..10}; do
+  result=$(./driver -d -e 0.05 -n 100000 -l 24 -k $hash_count)
+  echo "$hash_count $result"
+done | gnuplot -e "
+  set term pdf;
+  set yrange [0:1];
+  set output 'density_by_hash_function.fig.pdf';
+  plot '-' using 1:2 with linespoints title 'Density By Hash Function'"
+@
+
+And this generates the interesting plot we have here:
+\begin{figure}[h] % Place the figure here (h=here, t=top, b=bottom, p=page)
+    \centering
+    \includegraphics[width=0.8\textwidth]{density_by_hash_function.fig.pdf}
+    \caption{Density by Hash Function Count}
+    \label{fig:density_by_hash_funtion_count}
+\end{figure}
+
 \subsection{Specifying Epsilon}
 Explore how number-of-bits needed for set-size relates to hash function
 \subsection{Measuring Set Acceleration}
