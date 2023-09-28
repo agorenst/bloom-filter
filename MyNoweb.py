@@ -139,7 +139,7 @@ def CodeChunkToFigChunk(chunk):
             # print(targetLang)
             newChunk.append('@nl\n')
             newChunk.append(
-                '@text \\begin{listing}[H]\n@nl\n@text \\begin{minted}[fontsize=\\footnotesize,frame=lines,mathescape]{c}\n@nl\n')
+                '@text \\begin{listing}[H]\n@nl\n@text \\begin{minted}[fontsize=\\footnotesize,frame=lines,mathescape]{cpp}\n@nl\n')
             continue
         if line.split()[:1] == ['@defn']:
             #newChunk.append('@text // '+line)

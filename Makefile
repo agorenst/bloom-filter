@@ -24,18 +24,14 @@ bloomfilter.tex : bloomfilter.nw
 
 datagen:
 
-density.output: driver
-	./driver -d -e 0.01 -n 10000 -l 24 > density.output
-	./driver -d -e 0.01 -n 10000 -l 24 >> density.output
-	./driver -d -e 0.01 -n 10000 -l 24 >> density.output
-	./driver -d -e 0.1 -n 10000 -l 24 >> density.output
-	./driver -d -e 0.1 -n 10000 -l 24 >> density.output
-	./driver -d -e 0.1 -n 10000 -l 24 >> density.output
+density.output: driver bitdensity.sh
+	chmod u+x bitdensity.sh
+	./bitdensity.sh
 
 files: $(files)
 $(files): % : bloomfilter.nw
 	notangle -R$* $^ | cpif $@
 
 clean:
-	rm -r -f $(files) $(deps) $(progs) *~ *.o
-	latexmk -pdf -shell-escape bloomfilter -CA
+	rm -r -f $(files) $(deps) $(progs) *~ *.o *.tex
+	latexmk -pdf -shell-escape bloomfilter.pdf -CA

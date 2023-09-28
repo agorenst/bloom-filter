@@ -137,7 +137,7 @@ class bloom_filter {
   int count() const { return A.count(); }
 };
 @
-(We haven't mentioned the [[count]] method written above. That counts the number of bits-set-to-1, i.e., some value $c <= n$, and will be used in later experiments.)
+(We haven't mentioned the [[count]] method written above. That counts the number of bits-set-to-1, i.e., some value $c \leq n$, and will be used in later experiments.)
 
 There are still a few loose ends.
 Two things remain:
@@ -188,7 +188,7 @@ We need a so-called ``good'' hash for our Bloom filter.
 Hashing algorithms are a whole field into themselves, and one I hope to explore later.
 For now, we will defer to what I hear is established as ``good practice'' and use the public-domain MurmurHash3 algorithm\cite{murmur3}.
 This is understood to be an extremely fast and good hash, without the overhead of cryptographic guarantees.
-It provides a simple C-header interface, and most conveniently provides a ``seed'' parameter that maps to the $i$ in $h_i$.
+It provides a simple C-header interface, and most conveniently provides a ``seed'' parameter that exactly matches the use of $i$ in $h_i$.
 
 Here is our explicit hashing function:
 <<Hashing Function>>=
@@ -349,6 +349,7 @@ the driver ``just'' runs those experiments and terminates.
 In the following sections we'll describe each of our desired experiments.
 As we build the understanding of what experiments we'd like to run, that understanding will inform the settings we need, and then the parsing and error-checking.
 In that way we'll ``work backwards'' from our goal (run interesting experiments), and only at the end get into the implementation detail of the driver.
+We'll actually run the experiments in \cref{sec:experiments}.
 
 \subsection{Compute Expected Density of Optimal Bloom Filter}
 As mentioned in our motivating textbook\cite[111]{mitzenmacher2005probability}, an interesting property of an ``optimal'' Bloom filter
@@ -370,7 +371,7 @@ void optimal_density(void) {
   }
   const double density =
     static_cast<double>(bf.count()) / static_cast<double>(num_bits_in_filter);
-  printf("bloom filter density: %f\n", density);
+  printf("bloom filter density: %f, drift from 0.5: %f\n", density, std::fabs(0.5-density));
 }
 @
 Each line of code maps to a fairly straightforward idea for our experiment:
@@ -569,6 +570,9 @@ if (num_bits_in_filter == 0) {
   num_bits_in_filter = num_strings_in_set * num_bits_per_value;
 }
 if (num_hash_functions == 0) {
+  if (verbosity_level >= 1) {
+    printf("Ideal number of hash-functions pre-rounding: %f\n", -std::log2(desired_epsilon));
+  }
   num_hash_functions = size_t(-std::log2(desired_epsilon)) + rounding_constant;
 }
 if (verbosity_level >= 1) {
@@ -624,7 +628,6 @@ if (run_application_experiment) {
 #include <iostream>
 
 #include "bloomfilter.h"
-#include "bloomfilterset.h"
 #include "datagen.h"
 #include "murmur/MurmurHash3.h"
 @
@@ -656,7 +659,29 @@ Let's get some empirical results!
 
 \section{Experiments}\label{sec:experiments}
 \subsection{Optimal Parameters Bit-Density}
+We will explore whether our driver successfully confirms theoretical results.
+Here is an example invocation:
+<<Experiment: Bit-Density>>=
+./driver -d -n 100000 -l 24 -e 0.03 -v 1
+@
+To restate the parameters, we're running our \emph{density experiment} ([[d]]), saying that we'd like to build a bloom-filter
+to hold $100,000$ ([[n]]) strings, all of them \emph{length} ([[l]]) $24$, with a desired \emph{epsilon} of $3\%$.
+We also specify the \emph{verbosity} level ([[v]]) to help produce the desired output.
+
+What do we see here?
+
 \subsubsection{Variance}
+<<Experiment: Bit-Density with Rounding>>=
+./driver -v 1 -d -e 0.01 -n 100000 -l 24
+./driver -v 1 -d -e 0.01 -n 100000 -l 24 -r
+./driver -v 1 -d -e 0.05 -n 100000 -l 24
+./driver -v 1 -d -e 0.05 -n 100000 -l 24 -r
+@
+<<bitdensity.sh>>=
+#!/bin/bash
+<<Experiment: Bit-Density>>
+<<Experiment: Bit-Density with Rounding>>
+@
 \subsection{Non-Optimal Parameters Bit-Density}
 \subsection{Specifying Epsilon}
 Explore how number-of-bits needed for set-size relates to hash function
@@ -667,6 +692,7 @@ Explore how number-of-bits needed for set-size relates to hash function
 \appendix
 \section{Library Code Listings}
 \subsection{Bloom Filter (bloomfilter.h)}\label{bloomfilterlisting}
+\inputminted{c++}{bloomfilter.h}
 \subsection{Simple Bit Set (simplebitset.h)}\label{simplebitsetlisting}
 \inputminted{c++}{simplebitset.h}
 \section{Driver Code Listings}
