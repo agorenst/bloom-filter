@@ -9,6 +9,9 @@
 \usepackage{cleveref}
 \usepackage{listing}
 \usepackage{minted}
+\usepackage{tikz}
+% thanks: http://gnuplot.info/docs/latex_demo.pdf
+\usepackage{gnuplot-lua-tikz}
 
 \usepackage{biblatex}
 \addbibresource{library.bib}
@@ -699,16 +702,18 @@ for hash_count in {1..10}; do
   result=$(./driver -d -e 0.05 -n 100000 -l 24 -k $hash_count)
   echo "$hash_count $result"
 done | gnuplot -e "
-  set term pdf;
+  set terminal tikz size 3.5in,2.4in;
   set yrange [0:1];
-  set output 'density_by_hash_function.fig.pdf';
-  plot '-' using 1:2 with linespoints title 'Density By Hash Function'"
+  set xlabel 'Number of Hash Functions';
+  set ylabel 'Bit Density';
+  set output 'density_by_hash_function.fig.tex';
+  plot '-' using 1:2 with linespoints notitle"
 @
 
 And this generates the interesting plot we have here:
 \begin{figure}[h] % Place the figure here (h=here, t=top, b=bottom, p=page)
     \centering
-    \includegraphics[width=0.8\textwidth]{density_by_hash_function.fig.pdf}
+    \input{density_by_hash_function.fig.tex}
     \caption{Density by Hash Function Count}
     \label{fig:density_by_hash_funtion_count}
 \end{figure}
