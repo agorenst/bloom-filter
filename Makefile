@@ -4,8 +4,11 @@ CXX=clang++
 CXXFLAGS=-Wall -O2 -std=c++17 -g -flto
 
 files=$(shell for r in `noroots bloomfilter.nw | grep -v " "`; do echo $${r:2:-2}; done)
+figure_scripts=$(filter %.sh, $(files))
+figures=$(figure_scripts:.sh=.fig.tex)
 
-bloomfilter.pdf : bloomfilter.tex $(files) density_by_hash_function.fig.tex measure_epsilon.fig.tex
+
+bloomfilter.pdf : bloomfilter.tex $(files) $(figures)
 		latexmk -pdf -shell-escape $(basename $<)
 
 deps=datagen.o murmur/MurmurHash3.o
@@ -24,18 +27,9 @@ bloomfilter.tex : bloomfilter.nw
 
 datagen:
 
-density_by_hash_function.fig.tex: driver plot-density-per-hash.sh
-	chmod u+x plot-density-per-hash.sh
-	./plot-density-per-hash.sh
-
-measure_epsilon.fig.tex: driver validate-epsilon-empirically.sh
-	chmod u+x validate-epsilon-empirically.sh
-	./validate-epsilon-empirically.sh
-
-density.output: driver bitdensity.sh
-	chmod u+x bitdensity.sh
-	./bitdensity.sh > $@
-
+%.fig.tex: %.sh driver
+	chmod u+x $<
+	./$<
 
 files: $(files)
 $(files): % : bloomfilter.nw
@@ -43,4 +37,4 @@ $(files): % : bloomfilter.nw
 
 clean:
 	rm -r -f $(files) $(deps) $(progs) *~ *.o *.tex *.output *.fig.*
-	latexmk -pdf -shell-escape bloomfilter.pdf -CA
+	latexmk -pdf -shell-escape bloomfilter.pdf -CA -f

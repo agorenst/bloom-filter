@@ -365,11 +365,10 @@ This optimality will be in part reflected by that density.
 So let's enable our driver to compute the density of a Bloom filter!
 Here's the code:
 <<Bloom Filter Optimal Density>>=
-void optimal_density(void) {
+void optimal_density(bloom_filter<std::string, string_hash>& bf) {
   const auto strings = create_strings(num_strings_in_set, length_of_strings);
   if (verbosity_level >= 2) { printf("Done generating strings\n"); }
 
-  bloom_filter<std::string, string_hash> bf(num_bits_in_filter, num_hash_functions);
   for (auto& s : strings) {
     bf.set(s);
   }
@@ -387,7 +386,7 @@ This would complete our experiment run!
 \subsection{Bloom Filter False Positivity}
 This is one experiment!
 <<Bloom Filter False Positive Rate>>=
-void false_positive_rate(void) {
+void false_positive_rate(bloom_filter<std::string, string_hash>& bf) {
   auto total_strings = num_strings_in_set + num_strings_not_in_set;
   if (verbosity_level >= 1) {
     printf("total_strings: %d\n", total_strings);
@@ -398,8 +397,6 @@ void false_positive_rate(void) {
   }
   auto strings_in_set_end = std::begin(strings) + num_strings_in_set;
 
-  bloom_filter<std::string, string_hash> bf(num_bits_in_filter,
-                                            num_hash_functions);
   std::for_each(std::begin(strings), strings_in_set_end,
                 [&bf](auto &s) { bf.set(s); });
 
@@ -441,7 +438,6 @@ if (verbosity_level >= 2) { printf("Done generating strings\n"); }
 auto strings_in_set_end = std::begin(strings) + num_strings_in_set;
 
 std::set<std::string> base_set;
-bloom_filter<std::string, string_hash> bf(num_bits_in_filter, num_hash_functions);
 for (auto it = std::begin(strings); it != strings_in_set_end; it++) {
   base_set.insert(*it);
   bf.set(*it);
@@ -453,7 +449,7 @@ auto to_test_end = std::end(strings);
 
 <<Bloom Filter Application>>=
 #include <thread>
-void bloom_filter_application(void) {
+void bloom_filter_application(bloom_filter<std::string, string_hash>& bf) {
   <<Set Up Application Comparison>>
   double seconds = 0;
   size_t count = 0;
@@ -499,6 +495,8 @@ int rounding_constant = 0;
   
 bool print_help = false;
 int verbosity_level = 0;
+bool emit_total_size = false;
+bool emit_density = false;
 
 size_t num_hash_functions = 0;
 double num_bits_per_value = 0.0;
@@ -529,6 +527,10 @@ while ((c = getopt(argc, argv, "dfae:n:x:l:k:b:m:rhv:")) != -1) {
     case 'b': num_bits_per_value = std::strtod(optarg, nullptr); break; 
     case 'm': num_bits_in_filter = std::strtol(optarg, nullptr, 0); break; 
     case 'r': rounding_constant = 1; break;
+
+    // Parameters to control output
+    case 'z': emit_total_size = true; break;
+    case 't': emit_density = true; break; // implied by -d
 
     // Meta-parameters
     case 'h': print_help = true; break;
@@ -586,8 +588,10 @@ if (verbosity_level >= 1) {
 @
 And then finally we run the experiments we choose:
 <<Run Selected Experiments>>=
+bloom_filter<std::string, string_hash> bf(num_bits_in_filter, num_hash_functions);
 if (run_density_experiment) {
-  optimal_density();
+  optimal_density(bf);
+  emit_density = false;
 }
 if (run_false_positive_experiment) {
   if (num_strings_not_in_set <= 0) {
@@ -595,7 +599,7 @@ if (run_false_positive_experiment) {
            num_strings_not_in_set);
     return 1;
   }
-  false_positive_rate();
+  false_positive_rate(bf);
 }
 if (run_application_experiment) {
   if (num_strings_not_in_set <= 0) {
@@ -603,7 +607,7 @@ if (run_application_experiment) {
            num_strings_not_in_set);
     return 1;
   }
-  bloom_filter_application();
+  bloom_filter_application(bf);
 }
 @
 
@@ -662,8 +666,17 @@ and a means to exercise that Bloom filter.
 Let's get some empirical results!
 
 \section{Experiments}\label{sec:experiments}
-\subsection{Optimal Parameters Bit-Density}
 We will explore whether our driver successfully confirms theoretical results.
+
+\subsection{Optimal Parameters Bit-Density}
+We've claimed that, when left with defaults, we have an optimal bloom filter.
+One measure of this optimality is that the bit-density (the proportion of bits set to 1) should be very close to $0.5$.
+
+So, how about as we vary our desired
+
+
+
+
 Here is an example invocation:
 <<Experiment: Bit-Density>>=
 ./driver -d -n 100000 -l 24 -e 0.03 -v 1
@@ -698,25 +711,31 @@ So let's change the hash function count:
 \subsection{Non-Optimal Parameters Bit-Density}
 This invites us to consider how much it matters to have the ``wrong'' number of hash functions.
 <<plot-density-per-hash.sh>>=
+#!/bin/bash
+output="$(basename "$0" .sh).fig.tex"
 for hash_count in {1..40}; do
-  result=$(./driver -d -e 0.0009 -n 100000 -l 24 -k $hash_count)
+  result=$(./driver -d -e 0.0009 -n 100000 -l 24 -k "$hash_count")
   echo "$hash_count $result"
 done | gnuplot -e "
   set terminal tikz size 3.5in,2.4in;
   set yrange [0:1];
   set xlabel 'Number of Hash Functions';
   set ylabel 'Bit Density';
-  set output 'density_by_hash_function.fig.tex';
+  set output '$output';
   plot '-' using 1:2 with linespoints notitle"
 @
 
 And this generates the interesting plot we have here:
-\begin{figure}[h] % Place the figure here (h=here, t=top, b=bottom, p=page)
+\begin{figure}[ht]
     \centering
-    \input{density_by_hash_function.fig.tex}
+    \input{plot-density-per-hash.fig.tex}
     \caption{Density by Hash Function Count}
-    \label{fig:density_by_hash_funtion_count}
+    \label{fig:density_by_hash_function_count}
 \end{figure}
+
+
+
+
 
 \subsection{Specifying Epsilon}
 Explore how number-of-bits needed for set-size relates to hash function
@@ -724,9 +743,6 @@ Explore how number-of-bits needed for set-size relates to hash function
 
 \subsection{Measuring Set Acceleration}
 The original motivation of the bloom filter is to speed things up. Let's see:
-<<speedup.sh>>=
-./driver -v 2 -da -e 0.0009 -n 2000000 -l 24 -x 2000000
-@
 This experiment is a bit rough.
 
 What if the length of the strings is much longer? This creates something very surprising, the bloom filter takes a while!
@@ -743,6 +759,8 @@ This prompts another interesting question: how do we measure its variance?
 I don't rightly know.
 
 <<validate-epsilon-empirically.sh>>=
+#!/bin/bash
+output="$(basename "$0" .sh).fig.tex"
 e=0.8
 for i in {1..10}; do
   measured=$(./driver -f -e "$e" -n 100000 -x 100000 -l 24 -r)
@@ -759,15 +777,15 @@ gnuplot -e "
   set yrange [*:1];
   set logscale y;
   set key at graph 0.60,0.95;
-  set output 'measure_epsilon.fig.tex';
+  set output '$output';
   plot 'tmp.txt' using 1:2 with linespoints title 'Expected eps',
        'tmp.txt' using 1:3 with linespoints title 'Measured eps'
   "
 @
 
-\begin{figure}[h] % Place the figure here (h=here, t=top, b=bottom, p=page)
+\begin{figure}[ht]
     \centering
-    \input{measure_epsilon.fig.tex}
+    \input{validate-epsilon-empirically.fig.tex}
     \caption{Comparing Empirical to Theoretical $\epsilon$}
     \label{fig:measure_epsilon}
 \end{figure}
@@ -776,6 +794,9 @@ Interlude: one thing I realized is that, curiously, with $\epsilon > 0.5$,
 the false positive rate was always (at first) exactly $1.0$.
 Even for $\epsilon=0.51$ or similar.
 In debugging I found that this is because we'd always round down.
+
+\subsection{Size of Bloom Filter}
+The number of elements and the epsilon together dictate the size of the bloom-filter.
 
 \appendix
 \section{Library Code Listings}
