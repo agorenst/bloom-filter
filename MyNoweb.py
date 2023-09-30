@@ -88,6 +88,9 @@ def MakeLanguageMap(chunks):
                 if len(d) == 1 and d[0].endswith(".y"):
                     languageMap[n] = 'YACC'
                     needWork = True
+                if len(d) == 1 and d[0].endswith(".sh"):
+                    languageMap[n] = 'bash'
+                    needWork = True
                 if len(d) == 1 and d[0].endswith(".l"):
                     languageMap[n] = 'LEX'
                     needWork = True
@@ -135,11 +138,10 @@ def CodeChunkToFigChunk(chunk):
     chunkName = ""
     for line in chunk:
         if line.split()[:1] == ['@language']:
-            # targetLang = line.split()[1]
-            # print(targetLang)
+            targetLang = line.split()[1]
             newChunk.append('@nl\n')
             newChunk.append(
-                '@text \\begin{listing}[H]\n@nl\n@text \\begin{minted}[fontsize=\\footnotesize,frame=lines,mathescape]{cpp}\n@nl\n')
+                '@text \\begin{listing}[H]\n@nl\n@text \\begin{minted}[fontsize=\\footnotesize,frame=lines,mathescape]{'+targetLang+'}\n@nl\n')
             continue
         if line.split()[:1] == ['@defn']:
             #newChunk.append('@text // '+line)

@@ -406,7 +406,7 @@ void false_positive_rate(void) {
   auto false_positives = std::count_if(strings_in_set_end, std::end(strings),
                                        [&bf](auto &v) { return bf.test(v); });
   double fp_rate = double(false_positives) / double(num_strings_not_in_set);
-  printf("false positive rate: %f\n", fp_rate);
+  printf("%f\n", fp_rate);
 }
 @
 
@@ -698,8 +698,8 @@ So let's change the hash function count:
 \subsection{Non-Optimal Parameters Bit-Density}
 This invites us to consider how much it matters to have the ``wrong'' number of hash functions.
 <<plot-density-per-hash.sh>>=
-for hash_count in {1..10}; do
-  result=$(./driver -d -e 0.05 -n 100000 -l 24 -k $hash_count)
+for hash_count in {1..40}; do
+  result=$(./driver -d -e 0.0009 -n 100000 -l 24 -k $hash_count)
   echo "$hash_count $result"
 done | gnuplot -e "
   set terminal tikz size 3.5in,2.4in;
@@ -720,10 +720,63 @@ And this generates the interesting plot we have here:
 
 \subsection{Specifying Epsilon}
 Explore how number-of-bits needed for set-size relates to hash function
+
+
 \subsection{Measuring Set Acceleration}
+The original motivation of the bloom filter is to speed things up. Let's see:
+<<speedup.sh>>=
+./driver -v 2 -da -e 0.0009 -n 2000000 -l 24 -x 2000000
+@
+This experiment is a bit rough.
+
+What if the length of the strings is much longer? This creates something very surprising, the bloom filter takes a while!
+Presumably the hash function takes a while, let's see.
 \subsubsection{Optimal Parameters}
 \paragraph{Failure Modes}
 \subsubsection{Non-Optimal Parameters}
+
+\subsection{False Positive Rate}
+To what degree does our code empirically match the expected false-positive rate?
+Basically, when we specify an epsilon, do we get that epsilon?
+
+This prompts another interesting question: how do we measure its variance?
+I don't rightly know.
+
+<<validate-epsilon-empirically.sh>>=
+e=0.8
+for i in {1..10}; do
+  measured=$(./driver -f -e "$e" -n 100000 -x 100000 -l 24 -r)
+  echo "$e $e $measured"
+  e=$(echo "$e / 2" | bc -l)
+done > tmp.txt
+
+gnuplot -e "
+  set terminal tikz size 3.5in,2.4in;
+  set xlabel 'Specified Epsilon';
+  set ylabel 'Actual Epsilon';
+  set xrange [*:1];
+  set logscale x;
+  set yrange [*:1];
+  set logscale y;
+  set key at graph 0.60,0.95;
+  set output 'measure_epsilon.fig.tex';
+  plot 'tmp.txt' using 1:2 with linespoints title 'Expected eps',
+       'tmp.txt' using 1:3 with linespoints title 'Measured eps'
+  "
+@
+
+\begin{figure}[h] % Place the figure here (h=here, t=top, b=bottom, p=page)
+    \centering
+    \input{measure_epsilon.fig.tex}
+    \caption{Comparing Empirical to Theoretical $\epsilon$}
+    \label{fig:measure_epsilon}
+\end{figure}
+
+Interlude: one thing I realized is that, curiously, with $\epsilon > 0.5$,
+the false positive rate was always (at first) exactly $1.0$.
+Even for $\epsilon=0.51$ or similar.
+In debugging I found that this is because we'd always round down.
+
 \appendix
 \section{Library Code Listings}
 \subsection{Bloom Filter (bloomfilter.h)}\label{bloomfilterlisting}

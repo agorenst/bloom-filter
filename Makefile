@@ -5,7 +5,7 @@ CXXFLAGS=-Wall -O2 -std=c++17 -g -flto
 
 files=$(shell for r in `noroots bloomfilter.nw | grep -v " "`; do echo $${r:2:-2}; done)
 
-bloomfilter.pdf : bloomfilter.tex $(files) density_by_hash_function.fig.tex
+bloomfilter.pdf : bloomfilter.tex $(files) density_by_hash_function.fig.tex measure_epsilon.fig.tex
 		latexmk -pdf -shell-escape $(basename $<)
 
 deps=datagen.o murmur/MurmurHash3.o
@@ -28,10 +28,14 @@ density_by_hash_function.fig.tex: driver plot-density-per-hash.sh
 	chmod u+x plot-density-per-hash.sh
 	./plot-density-per-hash.sh
 
+measure_epsilon.fig.tex: driver validate-epsilon-empirically.sh
+	chmod u+x validate-epsilon-empirically.sh
+	./validate-epsilon-empirically.sh
 
 density.output: driver bitdensity.sh
 	chmod u+x bitdensity.sh
 	./bitdensity.sh > $@
+
 
 files: $(files)
 $(files): % : bloomfilter.nw
