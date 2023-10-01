@@ -23,7 +23,7 @@
 
 \section{Introduction}
 Formal computer science---including things like algorithms and data structures, computational complexity theory,
-as well as the more ``formal'' side of things like compilers, databases, and operating systems---is all just so fascinating.
+as well as the more ``formal'' side of practical things like compilers, databases, and operating systems---is all just so fascinating.
 In an academic settings, i.e., textbooks and college courses, treatments of these topics typically focus on the underlying ideas to the exclusion of practical implementations.
 This is understandable: the \emph{insights} of computer science are independent of the programming language, operating system, or hardware (even as some of those insights greatly influence these things!),
 and there are only so many pages in a textbook, or lectures in a course.
@@ -43,7 +43,7 @@ The rest of the document is as follows:
 examine the behavior of our implementation in a real environment.
 \item Finally, in \cref{sec:experiments}, we will present some findings and thoughts based on using that driver.
 \end{itemize}
-Along the way we will have brief interludes discussing how our practical work and findings complements academic treatments, for the learner.
+Along the way we will have brief interludes discussing how our practical work and findings complement academic treatments, for the learner.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -139,6 +139,7 @@ class bloom_filter {
   <<Bloom filter set>>
   <<Bloom filter test>>
   int count() const { return A.count(); }
+  size_t size() const { return A.size(); }
 };
 @
 (We haven't mentioned the [[count]] method written above. That counts the number of bits-set-to-1, i.e., some value $c \leq n$, and will be used in later experiments.)
@@ -374,7 +375,7 @@ void optimal_density(bloom_filter<std::string, string_hash>& bf) {
   }
   const double density =
     static_cast<double>(bf.count()) / static_cast<double>(num_bits_in_filter);
-  printf("%f\n", density);
+  printf("%f %zu\n", density, bf.size());
 }
 @
 Each line of code maps to a fairly straightforward idea for our experiment:
@@ -461,7 +462,8 @@ void bloom_filter_application(bloom_filter<std::string, string_hash>& bf) {
       }
     }
   }
-  printf("Tested against base in time %fs %zu\n", seconds, count);
+  printf("%f ", seconds);
+  assert(!count);
 
   seconds = 0;
   count = 0;
@@ -475,7 +477,8 @@ void bloom_filter_application(bloom_filter<std::string, string_hash>& bf) {
       }
     }
   }
-  printf("Tested against diff in time %fs %zu\n", seconds, count);
+  printf("%f\n", seconds);
+  assert(!count);
 }
 @
 
@@ -495,8 +498,6 @@ int rounding_constant = 0;
   
 bool print_help = false;
 int verbosity_level = 0;
-bool emit_total_size = false;
-bool emit_density = false;
 
 size_t num_hash_functions = 0;
 double num_bits_per_value = 0.0;
@@ -527,10 +528,6 @@ while ((c = getopt(argc, argv, "dfae:n:x:l:k:b:m:rhv:")) != -1) {
     case 'b': num_bits_per_value = std::strtod(optarg, nullptr); break; 
     case 'm': num_bits_in_filter = std::strtol(optarg, nullptr, 0); break; 
     case 'r': rounding_constant = 1; break;
-
-    // Parameters to control output
-    case 'z': emit_total_size = true; break;
-    case 't': emit_density = true; break; // implied by -d
 
     // Meta-parameters
     case 'h': print_help = true; break;
@@ -591,7 +588,6 @@ And then finally we run the experiments we choose:
 bloom_filter<std::string, string_hash> bf(num_bits_in_filter, num_hash_functions);
 if (run_density_experiment) {
   optimal_density(bf);
-  emit_density = false;
 }
 if (run_false_positive_experiment) {
   if (num_strings_not_in_set <= 0) {
@@ -625,6 +621,7 @@ if (run_application_experiment) {
 
 <<Driver Headers>>=
 #include <algorithm>
+#include <cassert>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -668,47 +665,71 @@ Let's get some empirical results!
 \section{Experiments}\label{sec:experiments}
 We will explore whether our driver successfully confirms theoretical results.
 
-\subsection{Optimal Parameters Bit-Density}
-We've claimed that, when left with defaults, we have an optimal bloom filter.
-One measure of this optimality is that the bit-density (the proportion of bits set to 1) should be very close to $0.5$.
+\subsection{Optimal Bit-Density}
+One initial theoretical result \cite{TOCITE} points out that any optimal Bloom filter should have a bit-density
+(that is, the proportion of bits set to 1) very close to $0.5$.
 
-So, how about as we vary our desired
+Can we validate this manifesting in our code, empirically? Yes.
+We might want a chart to show that, no matter the specified $\epsilon$, number of input strings, or length of strings,
+our default hash-function-count and Bloom-filter-size will yield the desired $\epsilon$ and have density very close.
 
+We're not going to be exhaustive here: this document is to \emph{demonstrate} that theoretical properties can be
+empirically observed, not a full validation of our Bloom filter implementation.
 
+So let's make an interesting graph: let's vary $\epsilon$, and chart how density \emph{and} filter-size varies.
 
-
-Here is an example invocation:
-<<Experiment: Bit-Density>>=
-./driver -d -n 100000 -l 24 -e 0.03 -v 1
-@
-To restate the parameters, we're running our \emph{density experiment} ([[d]]), saying that we'd like to build a bloom-filter
-to hold $100,000$ ([[n]]) strings, all of them \emph{length} ([[l]]) $24$, with a desired \emph{epsilon} of $3\%$.
-We also specify the \emph{verbosity} level ([[v]]) to help produce the desired output.
-
-What do we see here?
-
-\subsubsection{Variance}
-<<Experiment: Bit-Density with Rounding>>=
-./driver -v 1 -d -e 0.01 -n 100000 -l 24
-./driver -v 1 -d -e 0.01 -n 100000 -l 24 -r
-./driver -v 1 -d -e 0.05 -n 100000 -l 24
-./driver -v 1 -d -e 0.05 -n 100000 -l 24 -r
-@
-
-% TODO: format this as something markdown-printable?
-<<bitdensity.sh>>=
+<<plot-density.sh>>=
 #!/bin/bash
-<<Experiment: Bit-Density>>
-<<Experiment: Bit-Density with Rounding>>
+e=0.8
+output="$(basename "$0" .sh).fig.tex"
+for i in {1..10}; do
+  measured=$(./driver -d -e "$e" -n 100000 -l 24 -r)
+  echo "$e $measured"
+  e=$(echo "$e / 2" | bc -l)
+done | gnuplot -e "
+  set terminal tikz size 3.5in,2.4in;
+  set xlabel 'Specified $\epsilon$';
+  set xrange [*:1];
+  set logscale x;
+  set ylabel 'Bit Density';
+  set output '$output';
+  plot '-' using 1:2 with linespoints notitle"
 @
-\begin{itemize}
-\item The density is (largely) parameterized on the number of hash functions.
-\item We round down by default, and [[-r]] changes that to round-up. It changes the drift one way or the other; that's interesting.
-Suggests a practical optimization step, though not a huge one.
-\item The density is largely independent of most other parameters: it's really only the hash function count.
-So let's change the hash function count:
-\end{itemize}
-\subsection{Non-Optimal Parameters Bit-Density}
+
+And this generates the interesting plot we have here:
+\begin{figure}[ht]
+    \centering
+    \input{plot-density.fig.tex}
+    \caption{Density by Hash Function Count}
+    \label{fig:plot_density}
+\end{figure}
+
+<<plot-size.sh>>=
+#!/bin/bash
+e=0.8
+output="$(basename "$0" .sh).fig.tex"
+for i in {1..10}; do
+  measured=$(./driver -d -e "$e" -n 100000 -l 24 -r)
+  echo "$e $measured"
+  e=$(echo "$e / 2" | bc -l)
+done | gnuplot -e "
+  set terminal tikz size 3.5in,2.4in;
+  set xlabel 'Specified $\epsilon$';
+  set xrange [*:1];
+  set logscale x;
+  set ylabel 'Filer Size';
+  set output '$output';
+  plot '-' using 1:3 with linespoints notitle"
+@
+
+And this generates the interesting plot we have here:
+\begin{figure}[ht]
+    \centering
+    \input{plot-size.fig.tex}
+    \caption{Density by Hash Function Count}
+    \label{fig:plot_size}
+\end{figure}
+
 This invites us to consider how much it matters to have the ``wrong'' number of hash functions.
 <<plot-density-per-hash.sh>>=
 #!/bin/bash
@@ -734,22 +755,99 @@ And this generates the interesting plot we have here:
 \end{figure}
 
 
-
-
-
 \subsection{Specifying Epsilon}
 Explore how number-of-bits needed for set-size relates to hash function
 
 
 \subsection{Measuring Set Acceleration}
-The original motivation of the bloom filter is to speed things up. Let's see:
-This experiment is a bit rough.
+Does the total resident memory matter?
+<<acceleration-by-count.sh>>=
+#!/bin/bash
+output="$(basename "$0" .sh).fig.tex"
+tmpfile=$(mktemp)
+for hash_count in {1..10}; do
+  count="$hash_count"00000 
+  echo "driver -a -e 0.01 -n 1000000 -x $count -l 24" >&2
+  result=$(./driver -a -e 0.01 -n 1000000 -x $count -l 24)
+  echo "$count $result" >&2
+  echo "$count $result"
+done > $tmpfile
 
-What if the length of the strings is much longer? This creates something very surprising, the bloom filter takes a while!
-Presumably the hash function takes a while, let's see.
-\subsubsection{Optimal Parameters}
-\paragraph{Failure Modes}
-\subsubsection{Non-Optimal Parameters}
+gnuplot -e "
+  set terminal tikz size 5in,2.4in;
+  set xlabel 'Number of Excluded Values';
+  set format x '$%.0t \cdot 10^{%T}$';
+  set ylabel 'Time (Seconds)';
+  set output '$output';
+  plot '$tmpfile' using 1:2 with linespoints title 'Without BF',
+       '$tmpfile' using 1:3 with linespoints title 'With BF'"
+@
+
+\begin{figure}[ht]
+    \centering
+    \input{acceleration-by-count.fig.tex}
+    \caption{Comparing Empirical to Theoretical $\epsilon$}
+    \label{fig:acceleration_by_count}
+\end{figure}
+
+<<acceleration-by-count-big.sh>>=
+#!/bin/bash
+output="$(basename "$0" .sh).fig.tex"
+for hash_count in {1..10}; do
+  count="$hash_count"00000 
+  echo "driver -a -e 0.01 -n 1000000 -x $count -l 240" >&2
+  result=$(./driver -a -e 0.01 -n 1000000 -x $count -l 240)
+  echo "$count $result" >&2
+  echo "$count $result"
+done > tmp.txt
+
+gnuplot -e "
+  set terminal tikz size 5in,2.4in;
+  set xlabel 'Number of Excluded Values';
+  set format x '$%.0t \cdot 10^{%T}$';
+  set ylabel 'Time (Seconds)';
+  set output '$output';
+  plot 'tmp.txt' using 1:2 with linespoints title 'Without BF',
+       'tmp.txt' using 1:3 with linespoints title 'With BF'"
+@
+
+\begin{figure}[ht]
+    \centering
+    \input{acceleration-by-count-big.fig.tex}
+    \caption{Comparing Empirical to Theoretical $\epsilon$}
+    \label{fig:acceleration_by_count_big}
+\end{figure}
+
+<<acceleration-by-precision.sh>>=
+#!/bin/bash
+output="$(basename "$0" .sh).fig.tex"
+e=0.1
+for i in {1..10}; do
+  echo "driver -a -e $e -n 1000000 -x 500000 -l 240" >&2
+  result=$(./driver -a -e $e -n 1000000 -x 500000 -l 240)
+  e=$(echo "$e / 2" | bc -l)
+  echo "$e $result" >&2
+  echo "$e $result"
+done > tmp.txt
+
+gnuplot -e "
+  set terminal tikz size 5in,2.4in;
+  set xlabel 'Bloom Filter Precison';
+  set format x '$%.0t \cdot 10^{%T}$';
+  set ylabel 'Time (Seconds)';
+  set output '$output';
+  plot 'tmp.txt' using 1:2 with linespoints title 'Without BF',
+       'tmp.txt' using 1:3 with linespoints title 'With BF'"
+@
+
+\begin{figure}[ht]
+    \centering
+    \input{acceleration-by-precision.fig.tex}
+    \caption{Comparing Empirical to Theoretical $\epsilon$}
+    \label{fig:acceleration_by_precisin}
+\end{figure}
+
+
 
 \subsection{False Positive Rate}
 To what degree does our code empirically match the expected false-positive rate?
@@ -781,6 +879,8 @@ gnuplot -e "
   plot 'tmp.txt' using 1:2 with linespoints title 'Expected eps',
        'tmp.txt' using 1:3 with linespoints title 'Measured eps'
   "
+
+rm tmp.txt
 @
 
 \begin{figure}[ht]
@@ -795,8 +895,6 @@ the false positive rate was always (at first) exactly $1.0$.
 Even for $\epsilon=0.51$ or similar.
 In debugging I found that this is because we'd always round down.
 
-\subsection{Size of Bloom Filter}
-The number of elements and the epsilon together dictate the size of the bloom-filter.
 
 \appendix
 \section{Library Code Listings}

@@ -31,6 +31,9 @@ datagen:
 	chmod u+x $<
 	./$<
 
+%.fig.pdf: %.fig.tex
+	pdflatex -interaction=nonstopmode -jobname=$(basename $@) "\documentclass{standalone}\usepackage{tikz}\usepackage{gnuplot-lua-tikz}\begin{document}\input{$<}\end{document}"
+
 files: $(files)
 $(files): % : bloomfilter.nw
 	notangle -R$* $^ | cpif $@
