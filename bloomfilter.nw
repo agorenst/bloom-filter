@@ -366,10 +366,11 @@ This optimality will be in part reflected by that density.
 So let's enable our driver to compute the density of a Bloom filter!
 Here's the code:
 <<Bloom Filter Optimal Density>>=
-void optimal_density(bloom_filter<std::string, string_hash>& bf) {
+void optimal_density() {
   const auto strings = create_strings(num_strings_in_set, length_of_strings);
   if (verbosity_level >= 2) { printf("Done generating strings\n"); }
 
+  bloom_filter<std::string, string_hash> bf(num_bits_in_filter, num_hash_functions);
   for (auto& s : strings) {
     bf.set(s);
   }
@@ -387,7 +388,7 @@ This would complete our experiment run!
 \subsection{Bloom Filter False Positivity}
 This is one experiment!
 <<Bloom Filter False Positive Rate>>=
-void false_positive_rate(bloom_filter<std::string, string_hash>& bf) {
+void false_positive_rate() {
   auto total_strings = num_strings_in_set + num_strings_not_in_set;
   if (verbosity_level >= 1) {
     printf("total_strings: %d\n", total_strings);
@@ -398,6 +399,7 @@ void false_positive_rate(bloom_filter<std::string, string_hash>& bf) {
   }
   auto strings_in_set_end = std::begin(strings) + num_strings_in_set;
 
+  bloom_filter<std::string, string_hash> bf(num_bits_in_filter, num_hash_functions);
   std::for_each(std::begin(strings), strings_in_set_end,
                 [&bf](auto &s) { bf.set(s); });
 
@@ -439,6 +441,7 @@ if (verbosity_level >= 2) { printf("Done generating strings\n"); }
 auto strings_in_set_end = std::begin(strings) + num_strings_in_set;
 
 std::set<std::string> base_set;
+bloom_filter<std::string, string_hash> bf(num_bits_in_filter, num_hash_functions);
 for (auto it = std::begin(strings); it != strings_in_set_end; it++) {
   base_set.insert(*it);
   bf.set(*it);
@@ -450,7 +453,7 @@ auto to_test_end = std::end(strings);
 
 <<Bloom Filter Application>>=
 #include <thread>
-void bloom_filter_application(bloom_filter<std::string, string_hash>& bf) {
+void bloom_filter_application() {
   <<Set Up Application Comparison>>
   double seconds = 0;
   size_t count = 0;
@@ -585,9 +588,8 @@ if (verbosity_level >= 1) {
 @
 And then finally we run the experiments we choose:
 <<Run Selected Experiments>>=
-bloom_filter<std::string, string_hash> bf(num_bits_in_filter, num_hash_functions);
 if (run_density_experiment) {
-  optimal_density(bf);
+  optimal_density();
 }
 if (run_false_positive_experiment) {
   if (num_strings_not_in_set <= 0) {
@@ -595,7 +597,7 @@ if (run_false_positive_experiment) {
            num_strings_not_in_set);
     return 1;
   }
-  false_positive_rate(bf);
+  false_positive_rate();
 }
 if (run_application_experiment) {
   if (num_strings_not_in_set <= 0) {
@@ -603,7 +605,7 @@ if (run_application_experiment) {
            num_strings_not_in_set);
     return 1;
   }
-  bloom_filter_application(bf);
+  bloom_filter_application();
 }
 @
 
