@@ -13,8 +13,16 @@
 % thanks: http://gnuplot.info/docs/latex_demo.pdf
 \usepackage{gnuplot-lua-tikz}
 
+% Thanks https://tex.stackexchange.com/questions/99809/box-or-sidebar-for-additional-text
+\usepackage{wrapfig}
+\usepackage{tcolorbox}
+
 \usepackage{biblatex}
 \addbibresource{library.bib}
+
+\newenvironment{WrapText}[1][r]
+  {\wrapfigure{#1}{0.5\textwidth}\tcolorbox}
+  {\endtcolorbox\endwrapfigure}
 
 \begin{document}
 \maketitle
@@ -56,42 +64,56 @@ Along the way we will have brief interludes discussing how our practical work an
 This section ``reads along'' with a textbook description of Bloom filters\cite{mitzenmacher2005probability},
 and derives code from the prose.
 
-To begin, as described in our reference, we want a length-$n$ sequence $A$ of bits.
-We additionally specify $k$ hash-functions.
-This is the entirety of the state of our Bloom filter, so we can write:
 \subsection{Bloom Filter Implementation}
-<<Bloom filter state and construction>>=
+The Bloom filter is a persistent object that summarizes a collection of data,
+so we expect it to have some state.
+In particular, we have a sequence $A$ of $n$ bits, and a collection of $k$ different hash functions.
+This can be realized with the following code:
+<<Bloom Filter Implementation>>=
+template <class V, size_t (*h)(uint32_t i, const V &)>
+class bloom_filter {
 private:
   simple_bit_set A;
 
 public:
-  const size_t n;
-  const size_t k;
+  size_t n = 0;
+  size_t k = 0;
+  bloom_filter() {}
   bloom_filter(const size_t n, const size_t k) : A(n), n(n), k(k) {}
+  int count() const { return A.count(); }
+  size_t size() const { return A.size(); }
+  
+  <<Bloom filter set>>
+  <<Bloom filter test>>
+};
 @
-The field [[A]] is the core sequence of bits.
+To restate:
+The field [[A]] is the core sequence of bits.\footnote{
+  We implement it as a custom type, specified later in \cref{sec:arrayofbits}.
+}
 When we talk about ``setting'' or ``checking'' bits, we are referencing [[A]].
 The parameter [[n]] is the number of bits we'll be using in our sequence.
-Finally, [[k]] is the number of bits we set for each value we insert, i.e., the number of hash functions we need.
 
-As an implementation detail, the type of our container, as well as its hashing scheme,
-are passed as \emph{template} parameters.
-<<Bloom Filter C++ Type Interface>>=
-template <class V, size_t (*h)(uint32_t i, const V &)>
-@
-Given the C++ type system and its model of containers in its standard library,
-this seems like the appropriate way to specify this.
+The hash function [[h]] is provided at compile-time as a template-parameter.
+Note that it doesn't just take a [[V]] (by reference), but also an index [[i]].
+This [[i]] exactly corresponds to the index machinery our textbook relies on.
+The idea is that [[h(0, v)]] will give a \emph{completely} different value than [[h(1, v)]],
+even though [[v]] is the same between the two.
 
-\paragraph{Interlude: Theory To Practice}
-What are some more ways we might specify the hash functions for our Bloom filter?
-Observe that our implementation very directly maps to the prose: we expect the hash function to look something like [[h(i, v)]], where [[v]] is the value we want to hash, and [[i]] indicates that we should use the $i$-th hash function.
-An alternative implementation might be one where we have a single hash function, and the Bloom filter extends that to create multiple hash functions.
-Additionally, we're using a very C++-specific feature of \emph{templates}.
-The effect is that the function-pointer provided is going to be a compile-time constant, sparing us a likely-very-expensive indirect call.
-An alternative would be to provide the hashing function at runtime, which (modulo very sophisticated compiler optimizations) would indeed induce an indirect call.
-A separate practical consideration is our negotiating with our language's type-system, another detail frequently (understandably!) elided in typical academic introductions.
+\paragraph{Aside}
+We made some design decisions for our Bloom filter: the size and density ([[n]] and [[k]])
+are runtime parameters, but the type [[V]] and hash function [[h]] are compile-time.
+These considerations are (understandably) not discussed in theoretical treatments, but matter
+for practical implementations.
 
-With our parameters, and how they're set in our object, defined, we can turn to the key functionality:
+Part of these expositions is to consider \emph{where} we might consider these questions.
+A Bloom filter, and other algorithms, have \emph{theoretical} considerations (like
+the expected $\epsilon$) as also practical considerations. These include design questions,
+like: What's the type-system interface for a Bloom filter? How much is the design constrained by the particular language features?
+They also include practical considerations: For instance, alternative implementations could
+be more flexible with the type-system, but at the cost of an indirect call for each hash call.
+
+In any case, with our parameters, and how they're set in our object, defined, we can turn to the key functionality:
 How do we add elements to our filter, and how do we test if an element was added to our filter?
 For both operations we will consider a quote from our reference, and then map that to code.
 Happily, at this point we will find the mapping very straightforward.
@@ -127,33 +149,19 @@ bool test(const V &s) const {
 @
 
 For our demonstrative implementation, that is all we need! This completes the core of our implementation.
-We can wrap these up in a stand-alone C++ header defining this object, like so:
+Now we just place it in our header file:
 <<bloomfilter.h>>=
 #pragma once
 #include "simplebitset.h"
 #include <cstddef>
 #include <cstdint>
-<<Bloom Filter C++ Type Interface>>
-class bloom_filter {
-  <<Bloom filter state and construction>>
-  <<Bloom filter set>>
-  <<Bloom filter test>>
-  int count() const { return A.count(); }
-  size_t size() const { return A.size(); }
-};
+
+<<Bloom Filter Implementation>>
 @
-(We haven't mentioned the [[count]] method written above. That counts the number of bits-set-to-1, i.e., some value $c \leq n$, and will be used in later experiments.)
 
-There are still a few loose ends.
-Two things remain:
-\begin{enumerate}
-\item Implementing our array-of-bits [[simple_bit_set]]
-\item Providing concrete arguments for the template parameters [[V]] and [[h]].
-\end{enumerate}
+What remains unimplemented as is the [[simple_bit_set]], as well as our definitions of [[h]] and [[V]].
 
-We will address these in turn.
-
-\subsection{Array of Bits}
+\subsection{Array of Bits}\label{sec:arrayofbits}
 Some languages have this built in already.
 The standard C++ libraries provide a \emph{fixed-length} (at compile time) bit-array, but combining it with the dynamically-resizable [[std::vector]] container leads to a natural implementation:
 <<simplebitset.h>>=
@@ -168,6 +176,7 @@ private:
   std::vector<page> data;
 
 public:
+  simple_bit_set() {}
   simple_bit_set(const int size) : data((size / page_size) + 1, 0) {}
   bool test(unsigned int i) const {
     return data[(i / page_size)].test(i % page_size);
@@ -214,9 +223,6 @@ To hash the values would be a bug:
 In the case where we have two copies of the same string, their underlying bytes may exist in different memory locations so a naive hash would say they're \emph{different}, but we need them to be reported the same!
 So our [[string_hash]] implementation takes care of telling our underlying hash algorithm which data to look at, and how, for hashing.
 
-\paragraph{Interlude: Practical Considerations in Code}
-Domain and casting, TODO, write about that.
-
 \paragraph{Personal Interlude} More than once in my career a colleague has said ``we need a hashing algorithm that provides good guarantees. Let's use SHA!''
 In a sense, I agree: the properties promised by \emph{cryptographic} hashing functions are very nice.
 My background in computational complexity reminds me always that features (usually) have a price---in this case, CPU time.
@@ -226,8 +232,8 @@ This completes all the components of our implementation.
 
 \section{Harnessing the Code}\label{sec:harnesscode}
 Now we have a complete implementation of a Bloom filter.
-We expect to be able to use it in C++ with code like [[bloom_filter<std::string, string_hash> bf(m, k)]].
-That creates a Bloom filter [[bf]] to which we can add [[std::string]]-typed values, and later test if they were (likely) included.
+We expect to be able to use it in C++ with code like [[bloom_filter<std::string, string_hash> bf(n, k)]].
+That creates a Bloom filter [[bf]] to which we can add [[std::string]]-typed values, and later test if they were included.
 Our goal is to actually exercise this code. For that, we need:
 \begin{enumerate}
 \item A way to find or create strings to add to the Bloom filter.
@@ -240,7 +246,8 @@ And possibly more!
 We will find that writing the supporting code for this application is maybe not as conceptually sophisticated as the \emph{ideas} behind a Bloom filter,
 but is nonetheless nontrivial and affords opportunities for good---and bad---design.
 
-In the following subsections we'll fill out a piece of software, a \emph{driver}, that provides a command-line interface to run various Bloom filter experiments.
+In the following subsections we'll fill out a piece of software, a \emph{driver},
+that provides a command-line interface to run various Bloom filter experiments.
 
 \subsection{Creating Data}
 First, we need strings.
@@ -336,11 +343,13 @@ The overall design is outlined in \cref{driver.cpp}.
 <<Driver Headers>>
 <<Bloom Filter Settings>>
 <<Driver Utility Functions>>
+<<Driver State>>
 <<Possible Bloom Filter Experiments>>
 int main(int argc, char* argv[]) {
   <<Read Command-Line Parameters>>
   <<Error-Check Parameters>>
   <<Prepare Experiments>>
+  <<Initialize Driver State>>
   <<Run Selected Experiments>>
 }
 @
@@ -367,13 +376,8 @@ So let's enable our driver to compute the density of a Bloom filter!
 Here's the code:
 <<Bloom Filter Optimal Density>>=
 void optimal_density() {
-  const auto strings = create_strings(num_strings_in_set, length_of_strings);
-  if (verbosity_level >= 2) { printf("Done generating strings\n"); }
-
-  bloom_filter<std::string, string_hash> bf(num_bits_in_filter, num_hash_functions);
-  for (auto& s : strings) {
-    bf.set(s);
-  }
+  std::for_each(included_string_begin, included_string_end,
+                [](auto &s) { bf.set(s); });
   const double density =
     static_cast<double>(bf.count()) / static_cast<double>(num_bits_in_filter);
   printf("%f %zu\n", density, bf.size());
@@ -389,22 +393,10 @@ This would complete our experiment run!
 This is one experiment!
 <<Bloom Filter False Positive Rate>>=
 void false_positive_rate() {
-  auto total_strings = num_strings_in_set + num_strings_not_in_set;
-  if (verbosity_level >= 1) {
-    printf("total_strings: %d\n", total_strings);
-  }
-  const auto strings = create_strings(total_strings, length_of_strings);
-  if (verbosity_level >= 2) {
-    printf("Done generating strings\n");
-  }
-  auto strings_in_set_end = std::begin(strings) + num_strings_in_set;
-
-  bloom_filter<std::string, string_hash> bf(num_bits_in_filter, num_hash_functions);
-  std::for_each(std::begin(strings), strings_in_set_end,
-                [&bf](auto &s) { bf.set(s); });
-
-  auto false_positives = std::count_if(strings_in_set_end, std::end(strings),
-                                       [&bf](auto &v) { return bf.test(v); });
+  std::for_each(included_string_begin, included_string_end,
+                [](auto &s) { bf.set(s); });
+  auto false_positives = std::count_if(excluded_string_begin, excluded_string_end,
+                                       [](auto &v) { return bf.test(v); });
   double fp_rate = double(false_positives) / double(num_strings_not_in_set);
   printf("%f\n", fp_rate);
 }
@@ -431,35 +423,20 @@ public:
 @
 
 We need to set up our two sets to compare:
-<<Set Up Application Comparison>>=
-auto total_strings = num_strings_in_set + num_strings_not_in_set;
-if (verbosity_level >= 1) {
-  printf("total_strings: %d\n", total_strings);
-}
-const auto strings = create_strings(total_strings, length_of_strings);
-if (verbosity_level >= 2) { printf("Done generating strings\n"); }
-auto strings_in_set_end = std::begin(strings) + num_strings_in_set;
-
-std::set<std::string> base_set;
-bloom_filter<std::string, string_hash> bf(num_bits_in_filter, num_hash_functions);
-for (auto it = std::begin(strings); it != strings_in_set_end; it++) {
-  base_set.insert(*it);
-  bf.set(*it);
-}
-
-auto to_test_begin = strings_in_set_end;
-auto to_test_end = std::end(strings);
-@
 
 <<Bloom Filter Application>>=
-#include <thread>
 void bloom_filter_application() {
-  <<Set Up Application Comparison>>
+  // Initiaize everything.
+  std::for_each(included_string_begin, included_string_end,
+              [](auto &s) {
+                bf.set(s);
+                base_set.insert(s);
+              });
   double seconds = 0;
   size_t count = 0;
   {
     timer_object t(&seconds);
-    for (auto it = to_test_begin; it != to_test_end; it++) {
+    for (auto it = excluded_string_begin; it != excluded_string_end; it++) {
       if (base_set.find(*it) != base_set.end()) {
         count++;
       }
@@ -472,7 +449,7 @@ void bloom_filter_application() {
   count = 0;
   {
     timer_object t(&seconds);
-    for (auto it = to_test_begin; it != to_test_end; it++) {
+    for (auto it = excluded_string_begin; it != excluded_string_end; it++) {
       if (bf.test(*it)) {
         if (base_set.find(*it) != base_set.end()) {
           count++;
@@ -487,7 +464,6 @@ void bloom_filter_application() {
 
 The goal of this experiment is to build some confidence that a Bloom filter provides
 a benefit.
-
 
 \subsection{Driver Plumbing}
 Let's begin to dive into those chunks more explicitly.
@@ -510,7 +486,17 @@ bool run_density_experiment = false;
 bool run_false_positive_experiment = false;
 bool run_application_experiment = false;
 @
-These parameter
+These parameters also dictate some values:
+<<Driver State>>=
+bloom_filter<std::string, string_hash> bf;
+std::set<std::string> base_set;
+std::vector<std::string> strings;
+std::vector<std::string>::const_iterator
+  included_string_begin,
+  included_string_end,
+  excluded_string_begin,
+  excluded_string_end;
+@
 
 We set those settings through command-line parsing:
 <<Read Command-Line Parameters>>=
@@ -586,6 +572,28 @@ if (verbosity_level >= 1) {
            num_bits_per_value, num_bits_in_filter, num_hash_functions);
 }
 @
+
+
+<<Initialize Driver State>>=
+auto total_strings = num_strings_in_set + num_strings_not_in_set;
+// This is assigning globals
+strings = create_strings(total_strings, length_of_strings);
+included_string_begin = std::begin(strings);
+included_string_end = included_string_begin+num_strings_in_set;
+excluded_string_begin = included_string_end;
+excluded_string_end = excluded_string_begin+num_strings_not_in_set;
+assert(excluded_string_end == std::end(strings));
+
+if (verbosity_level > 1) {
+  printf("will add %zu strings, test %zu strings",
+    std::distance(included_string_begin, included_string_end),
+    std::distance(excluded_string_begin, excluded_string_end));
+}
+
+// Initialize the bf:
+bf = bloom_filter<std::string, string_hash>(num_bits_in_filter, num_hash_functions);
+@
+
 And then finally we run the experiments we choose:
 <<Run Selected Experiments>>=
 if (run_density_experiment) {
@@ -719,7 +727,7 @@ done | gnuplot -e "
   set xlabel 'Specified $\epsilon$';
   set xrange [*:1];
   set logscale x;
-  set ylabel 'Filer Size';
+  set ylabel 'Filter Size';
   set output '$output';
   plot '-' using 1:3 with linespoints notitle"
 @
@@ -824,30 +832,24 @@ rm $tmpfile
 <<acceleration-by-precision.sh>>=
 #!/bin/bash
 output="$(basename "$0" .sh).fig.tex"
-tmpfile=$(mktemp)
 e=0.1
 for i in {1..10}; do
-  result=$(./driver -a -e $e -n 1000000 -x 500000 -l 240)
+  result=$(./driver -a -e $e -n 1000000 -x 1000000 -l 240)
   e=$(echo "$e / 2" | bc -l)
   echo "$e $result"
-done > $tmpfile
-
-gnuplot -e "
+done | gnuplot -e "
   set terminal tikz size 5in,2.4in;
   set xlabel 'Bloom Filter Precison';
   set format x '$%.0t \cdot 10^{%T}$';
   set ylabel 'Time (Seconds)';
   set output '$output';
-  plot '$tmpfile' using 1:2 with linespoints title 'Without BF',
-       '$tmpfile' using 1:3 with linespoints title 'With BF'"
-
-rm $tmpfile
+  plot '-' using 1:3 with linespoints title 'With BF'"
 @
 
 \begin{figure}[ht]
     \centering
     \input{acceleration-by-precision.fig.tex}
-    \caption{Comparing Empirical to Theoretical $\epsilon$}
+    \caption{Runtime Variation by Epsilon}
     \label{fig:acceleration_by_precisin}
 \end{figure}
 
@@ -911,7 +913,9 @@ In debugging I found that this is because we'd always round down.
 \subsection{Main Driver}
 \inputminted{c++}{driver.cpp}
 \subsection{Generating Data}
+\paragraph{datagen.h}
 \inputminted{c++}{datagen.h}
+\paragraph{datagen.cpp}
 \inputminted{c++}{datagen.cpp}
 \end{document}
 

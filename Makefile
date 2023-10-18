@@ -7,9 +7,9 @@ files=$(shell for r in `noroots bloomfilter.nw | grep -v " "`; do echo $${r:2:-2
 figure_scripts=$(filter %.sh, $(files))
 figures=$(figure_scripts:.sh=.fig.tex)
 
-bloomfilter.pdf : bloomfilter.tex $(files) $(figures)
+bloomfilter.pdf : bloomfilter.tex library.bib $(files) $(figures)
 		latexmk -pdf -shell-escape $(basename $<)
-		
+
 files: $(files)
 $(files): % : bloomfilter.nw
 	notangle -R$* $^ | cpif $@
