@@ -151,6 +151,7 @@ bool test(const V &s) const {
 For our demonstrative implementation, that is all we need! This completes the core of our implementation.
 Now we just place it in our header file:
 <<bloomfilter.h>>=
+% HIDDEN
 #pragma once
 #include "simplebitset.h"
 #include <cstddef>

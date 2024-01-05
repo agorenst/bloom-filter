@@ -1,10 +1,20 @@
 from __future__ import print_function
 import sys
 from collections import defaultdict
+
+
+# Part 1: build the chunk list, we have a state machine
+# that scans the input lines and collects them.
+# We also build up properties for (code) chunks.
 chunks = defaultdict(list)
+chunksHidden = defaultdict(lambda: False)
 state = ''
+skipLine = False
 chunkNum = -1
 for line in sys.stdin:
+    if skipLine:
+        skipLine = False
+        continue
     if line.strip() == '@file ' + sys.argv[1]:
         print(line, end='')
         continue
@@ -26,6 +36,10 @@ for line in sys.stdin:
         assert(int(line.split()[2]) == chunkNum)
         state = ''
         chunkNum = -1
+    elif line.strip().split() == ["@text", "%", "HIDDEN"]:
+        chunksHidden[chunkNum] = True
+        # We also need to skip a line to avoid two @nl directives.
+        skipLine = True
     else:
         assert(chunkNum != -1)
         chunks[chunkNum].append(line)
@@ -141,7 +155,7 @@ def CodeChunkToFigChunk(chunk):
             targetLang = line.split()[1]
             newChunk.append('@nl\n')
             newChunk.append(
-                '@text \\begin{listing}[H]\n@nl\n@text \\begin{minted}[fontsize=\\footnotesize,frame=lines,mathescape]{'+targetLang+'}\n@nl\n')
+                '@text \\begin{listing}[H]\n@nl\n@text \\begin{minted}[fontsize=\\footnotesize,frame=lines,mathescape]{'+targetLang+'}\n')
             continue
         if line.split()[:1] == ['@defn']:
             #newChunk.append('@text // '+line)
@@ -178,6 +192,8 @@ for n in chunks.keys():
     chunks[n] = CodeChunkToFigChunk(chunks[n])
 
 
+# Now re-emit our data
 for n in sorted(chunks.keys()):
+    if chunksHidden[n]: continue
     for line in chunks[n]:
         print(line, end='')
