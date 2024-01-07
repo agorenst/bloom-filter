@@ -24,6 +24,8 @@
   {\wrapfigure{#1}{0.5\textwidth}\tcolorbox}
   {\endtcolorbox\endwrapfigure}
 
+\newmintedfile[completefile]{c++}{fontsize=\small,linenos=true}
+
 \begin{document}
 \maketitle
 
@@ -907,17 +909,17 @@ In debugging I found that this is because we'd always round down.
 \appendix
 \section{Library Code Listings}
 \subsection{Bloom Filter (bloomfilter.h)}\label{bloomfilterlisting}
-\inputminted{c++}{bloomfilter.h}
+\inputminted[fontsize=\small,linenos=true]{c++}{bloomfilter.h}
 \subsection{Simple Bit Set (simplebitset.h)}\label{simplebitsetlisting}
-\inputminted{c++}{simplebitset.h}
+\inputminted[fontsize=\small,linenos=true]{c++}{simplebitset.h}
 \section{Driver Code Listings}
 \subsection{Main Driver}
-\inputminted{c++}{driver.cpp}
+\inputminted[fontsize=\small,linenos=true]{c++}{driver.cpp}
 \subsection{Generating Data}
 \paragraph{datagen.h}
-\inputminted{c++}{datagen.h}
+\inputminted[fontsize=\small,linenos=true]{c++}{datagen.h}
 \paragraph{datagen.cpp}
-\inputminted{c++}{datagen.cpp}
+\inputminted[fontsize=\small,linenos=true]{c++}{datagen.cpp}
 \end{document}
 
 % Original paper:

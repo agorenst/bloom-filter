@@ -155,7 +155,7 @@ def CodeChunkToFigChunk(chunk):
             targetLang = line.split()[1]
             newChunk.append('@nl\n')
             newChunk.append(
-                '@text \\begin{listing}[H]\n@nl\n@text \\begin{minted}[fontsize=\\footnotesize,frame=lines,mathescape]{'+targetLang+'}\n')
+                '@text \\begin{figure}\n@nl\n@text \\begin{minted}[fontsize=\\footnotesize,frame=lines,mathescape]{'+targetLang+'}\n')
             continue
         if line.split()[:1] == ['@defn']:
             #newChunk.append('@text // '+line)
@@ -178,7 +178,7 @@ def CodeChunkToFigChunk(chunk):
             if chunkName not in chunkLabelMap:
                 newChunk.append('@text \label{'+chunkName+'}\n@nl\n')
                 chunkLabelMap[chunkName] = True
-            newChunk.append('@text \end{listing}\n@nl\n')
+            newChunk.append('@text \end{figure}\n@nl\n')
             line = line.replace('code', 'docs')
         newChunk.append(line)
     return newChunk

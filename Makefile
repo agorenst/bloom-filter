@@ -12,7 +12,7 @@ bloomfilter.pdf : bloomfilter.tex library.bib $(files) $(figures)
 
 files: $(files)
 $(files): % : bloomfilter.nw
-	notangle -R$* $^ | cpif $@
+	notangle -R$* $^ | sed -e '/% HIDDEN/d' | cpif $@
 
 deps=datagen.o murmur/MurmurHash3.o
 
