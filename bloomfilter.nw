@@ -12,6 +12,7 @@
 \usepackage{tikz}
 % thanks: http://gnuplot.info/docs/latex_demo.pdf
 \usepackage{gnuplot-lua-tikz}
+\usepackage[section]{placeins}
 
 % Thanks https://tex.stackexchange.com/questions/99809/box-or-sidebar-for-additional-text
 \usepackage{wrapfig}
@@ -35,7 +36,7 @@
 Formal computer science---including things like algorithms and data structures, computational complexity theory,
 as well as the more ``formal'' side of practical things like compilers, databases, and operating systems---is all just so fascinating.
 In an academic settings, i.e., textbooks and college courses, treatments of these topics typically focus on the underlying ideas to the exclusion of practical implementations.
-This is understandable: the \emph{insights} of computer science are independent of the programming language, operating system, or hardware (even as some of those insights greatly influence these things!),
+This is understandable: the insights of computer science are independent of the programming language, operating system, or hardware (even as some of those insights greatly influence these things!),
 and there are only so many pages in a textbook, or lectures in a course.
 
 I think, however, such treatments would benefit from practical implementations of their ideas.
@@ -43,8 +44,8 @@ This paper is the first in a hoped-for series that provides a stand-alone\footno
 practical\footnote{In the sense that the code runs and, at least sometimes, exhibits its purported behavior.}, and approachable\footnote{In the sense that, with the accompanying text, readers will find the code completely comprehensible.}
 implementation of a ``textbook'' algorithm.
 
-Herein, we will discuss Bloom filters, introduced\cite{bloom1970} over 50 years ago and still going strong.
-From the perspective that this document is to \emph{supplement} existing textbook discussions (usually in specialized algorithms textbooks\cite{mitzenmacher2005probability}),
+We will discuss Bloom filters, introduced\cite{bloom1970} over 50 years ago and still going strong.
+From the perspective that this document is to supplement existing textbook discussions (usually in specialized algorithms textbooks\cite{mitzenmacher2005probability}),
 we will jump as quickly as possible into a concrete implementation.
 The rest of the document is as follows:
 \begin{itemize}
@@ -66,9 +67,8 @@ Along the way we will have brief interludes discussing how our practical work an
 This section ``reads along'' with a textbook description of Bloom filters\cite{mitzenmacher2005probability},
 and derives code from the prose.
 
-\subsection{Bloom Filter Implementation}
-The Bloom filter is a persistent object that summarizes a collection of data,
-so we expect it to have some state.
+\subsection{Bloom Filter Implementation}\label{sec:impl}
+The Bloom filter is a persistent object that summarizes a collection of data, so we expect it to have some state.
 In particular, we have a sequence $A$ of $n$ bits, and a collection of $k$ different hash functions.
 This can be realized with the following code:
 <<Bloom Filter Implementation>>=
@@ -90,10 +90,9 @@ public:
 };
 @
 To restate:
-The field [[A]] is the core sequence of bits.\footnote{
-  We implement it as a custom type, specified later in \cref{sec:arrayofbits}.
-}
-When we talk about ``setting'' or ``checking'' bits, we are referencing [[A]].
+The field [[A]] is the core sequence of bits.
+It's type, [[simple_bit_set]], is specified later in \cref{sec:arrayofbits}.
+When we talk about ``setting'' or ``checking'' bits, we are referencing to operations on [[A]].
 The parameter [[n]] is the number of bits we'll be using in our sequence.
 
 The hash function [[h]] is provided at compile-time as a template-parameter.
@@ -101,6 +100,7 @@ Note that it doesn't just take a [[V]] (by reference), but also an index [[i]].
 This [[i]] exactly corresponds to the index machinery our textbook relies on.
 The idea is that [[h(0, v)]] will give a \emph{completely} different value than [[h(1, v)]],
 even though [[v]] is the same between the two.
+While mechanically it is a single function, we can pretend it's an arbitrary-length array of hash functions, the first parameter being the ``index'' into that array.
 
 \paragraph{Aside}
 We made some design decisions for our Bloom filter: the size and density ([[n]] and [[k]])
@@ -110,12 +110,14 @@ for practical implementations.
 
 Part of these expositions is to consider \emph{where} we might consider these questions.
 A Bloom filter, and other algorithms, have \emph{theoretical} considerations (like
-the expected $\epsilon$) as also practical considerations. These include design questions,
-like: What's the type-system interface for a Bloom filter? How much is the design constrained by the particular language features?
-They also include practical considerations: For instance, alternative implementations could
+the expected $\epsilon$) as also practical considerations.
+These include design questions, like:
+What's the type-system interface for a Bloom filter?
+How much is the design constrained by the particular language features?
+These extend into practical considerations: For instance, alternative implementations could
 be more flexible with the type-system, but at the cost of an indirect call for each hash call.
 
-In any case, with our parameters, and how they're set in our object, defined, we can turn to the key functionality:
+In any case, with our parameters defined, we can turn to the key functionality:
 How do we add elements to our filter, and how do we test if an element was added to our filter?
 For both operations we will consider a quote from our reference, and then map that to code.
 Happily, at this point we will find the mapping very straightforward.
@@ -150,8 +152,8 @@ bool test(const V &s) const {
 }
 @
 
-For our demonstrative implementation, that is all we need! This completes the core of our implementation.
-Now we just place it in our header file:
+For our demonstrative implementation, that is all we need! This completes the core of our implementation,
+and we can wrap it in a header file.
 <<bloomfilter.h>>=
 % HIDDEN
 #pragma once
@@ -195,10 +197,11 @@ public:
   }
 };
 @
-The one ``trick'' that may be new to implementors is how we ``translate'' [[i]] first into which 64-bit [[page]] to look up, and then look up the right bit within that page.
+The one ``trick'' that may be new to implementors is how we ``translate'' [[i]] into which 64-bit [[page]] to look up, and then look up the right bit within that page.
 We can also drill into another detail: the number of bits we set will always be some multiple of [[page_size]].
 Consequently, we may sometimes have slightly more bits than our Bloom filter expects.
-This isn't anticipated to appreciably change the performance or even the analysis, but another example of a ``rough edge'' between theory and practice.
+This is fine, they're simply never referenced.
+This also isn't anticipated to appreciably change the performance or even the analysis, but another example of a ``rough edge'' between theory and practice.
 
 \subsection{Hashing Scheme and Values to Hash}
 We need a so-called ``good'' hash for our Bloom filter.
@@ -232,182 +235,53 @@ My background in computational complexity reminds me always that features (usual
 When we just want to get a nice hashing algorithm for some in-memory object, we typically don't need to worry about hackers trying to, given the hash result, figure out the actual value!
 
 This completes all the components of our implementation.
+We have a Bloom filter library!
+We could say we're done here: ``in principle'' someone can go use this code and do Bloom-filter-y things with it.
+We are going to do just that: harness the code into a small command-line program that is purpose-fit to run experiments.
 
 \section{Harnessing the Code}\label{sec:harnesscode}
-Now we have a complete implementation of a Bloom filter.
-We expect to be able to use it in C++ with code like [[bloom_filter<std::string, string_hash> bf(n, k)]].
-That creates a Bloom filter [[bf]] to which we can add [[std::string]]-typed values, and later test if they were included.
-Our goal is to actually exercise this code. For that, we need:
-\begin{enumerate}
-\item A way to find or create strings to add to the Bloom filter.
-\item A way to find or create (possibly different) strings to test-membership-of in the Bloom filter.
-\item A way to observe expected properties of a Bloom filter: namely its false-positive rate and its bit-density.
-\item A way to compare the application of a Bloom filter and see if its use saves time.
-\end{enumerate}
-And possibly more!
+We want to write code to run experiments on our Bloom filter.
+We'll go through the various components we need, chunk-by-chunk, and then at the end tie it all together into a single driver program.
 
-We will find that writing the supporting code for this application is maybe not as conceptually sophisticated as the \emph{ideas} behind a Bloom filter,
-but is nonetheless nontrivial and affords opportunities for good---and bad---design.
-
-In the following subsections we'll fill out a piece of software, a \emph{driver},
-that provides a command-line interface to run various Bloom filter experiments.
-
-\subsection{Creating Data}
-First, we need strings.
-We can find real-world datasets, but for our purposes we can ``just'' generate random strings.
-
-Let's model our need for random strings as a generator:
-<<String Generator Class>>=
-class string_generator {
-  std::random_device rd;
-  std::default_random_engine e1;
-  std::uniform_int_distribution<int> uniform_dist;
-public:
-  string_generator();
-  std::string operator()(size_t len);
-};
-@
-
-Random number generators are yet-again another field into themselves that again I hope to explore later.
-In keeping with our theme, there are a lot of particulars mapping the concepts of RNG (random number generation)
-to C++ code, but for this writeup we won't get into them.
-For our purposes, we're just using them as a ``black box'' to get a nice selection of random strings expediently.
-
-Explicitly, we can get random strings like:
-<<Generator Implementation>>=
+\subsection{Generating Random Strings}
+Bloom filters summarize sets of strings: so let's make lots of unique strings.
+We're not going to worry about efficiency at all, but just try to expediently generate guaranteed-unique strings.
+Our implementation follows a fairly standard pattern: generate stuff and deduplicate things via a set until we get to a big-enough set.
+<<Create Strings>>=
 const static std::string letter_set =
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
-string_generator::string_generator()
-    : e1(rd()), uniform_dist(0, letter_set.size()) {}
-
-std::string string_generator::operator()(size_t len) {
-  std::string next;
-  next.reserve(len);
-  for (size_t c = 0; c < len; c++) {
-    next += letter_set[uniform_dist(e1)];
-  }
-  return next;
-}
-@
-
-The [[letter_set]] collection is just a way to, in case if it's needed, ensure our
-random strings are easily human-readable.
-The constructor essentially handles the random-number-generator-initialization.
-Finally, the [[operator()]] method is how we get our string: we give it a [[len]] parameter, and it generates a string with that many characters drawn uniformly at random from our letter-set.
-
-The following code and explanation shows how we use this underlying generator:
-<<Creating Strings with the Generator>>=
 std::vector<std::string> create_strings(size_t count, size_t len) {
+  std::random_device rd;
+  std::default_random_engine e1(rd());
+  std::uniform_int_distribution<int> uniform_dist(0, letter_set.length()-1);
+
   std::unordered_set<std::string> unique_strings;
-  string_generator g;
+  std::string output;
+  output.resize(length_of_strings);
   while (unique_strings.size() < count) {
-    unique_strings.insert(g(len));
+    for (int j = 0; j < length_of_strings; j++) {
+      auto k = uniform_dist(e1);
+      output[j] = letter_set[k];
+    }
+    unique_strings.insert(output);
   }
   std::vector<std::string> data(std::begin(unique_strings),
                                 std::end(unique_strings));
   return data;
 }
 @
-Our intention is to create a collection of random strings, and moreover \emph{distinct} random strings.
-An expedient way to guarantee distinctness is to add generated strings to a set until the size of the set is the desired amount.
-So long as we know there are enough possible strings (i.e., that [[len]] is big enough relative to [[count]]) we'll succeed.
-In our case, this will be fast-enough, though I'm sure there are much better ways of doing this.
+This is a pretty limited generator:
+There's lots of API limitations: we are fixed to create [[count]] strings all of the same length.
+There is no way to specify the ``random seed'' to enable repeatability.
+There are also probably lots of C++-ism improvements, like move-semantic stuff (including emplacing), as well as API changes like taking an output interator.
+Note also that a small-enough length, with a big-enough count request, means we'd never terminate (the set would simply never get big enough).
+But! For our purposes, despite all these limitations, it gets us enough to run our experiments.
 
-We can wrap these code samples up into a small software package to link into our driver.
-<<datagen.h>>=
-#include <random>
-#include <string>
-#include <vector>
-<<String Generator Class>>
-std::vector<std::string> create_strings(size_t count, size_t len);
-@
-
-<<datagen.cpp>>=
-#include "datagen.h"
-
-#include <unordered_set>
-<<Generator Implementation>>
-<<Creating Strings with the Generator>>
-@
-
-\subsection{Experiment Driver}
-Recall that we can understand our previous code (\cref{bloomfilter.h}) as creating a library.
-In general one does not really ``run'' a library; it only makes sense to run the code as part of a larger piece of software.
-This is reflecting mechanically in our C++ code by the fact that none of our code so far has a [[main]] function.
-
-A common piece of software to provide with a library is a \emph{driver}, which can be understood as a limited piece of software,
-typically a command-line utility, that can take user input and exercise different pieces of code in the library.
-Code-compilers typically operate in this way, most notably LLVM makes that very explicit \cite{TOCITE}, but also other processing libraries.
-
-The code we'll implement for our experiments will not quite be an all-purpose driver, but is influenced by that mindset.
-The overall design is outlined in \cref{driver.cpp}.
-<<driver.cpp>>=
-<<Driver Headers>>
-<<Bloom Filter Settings>>
-<<Driver Utility Functions>>
-<<Driver State>>
-<<Possible Bloom Filter Experiments>>
-int main(int argc, char* argv[]) {
-  <<Read Command-Line Parameters>>
-  <<Error-Check Parameters>>
-  <<Prepare Experiments>>
-  <<Initialize Driver State>>
-  <<Run Selected Experiments>>
-}
-@
-\paragraph{High-Level Driver Design}
-From an executable perspective, our driver will read first commmand-line parameters (\cref{Read Command-Line Parameters}),
-and then use those to set our experiment-state (\cref{Bloom Filter Settings}).
-Some of those parameters set which experiments we'd like to run.
-Those experiments are defined in \cref{Possible Bloom Filter Experiments}, and (after error-checking our parameters in \cref{Error-Check Parameters}),
-the driver ``just'' runs those experiments and terminates.
-
-In the following sections we'll describe each of our desired experiments.
-As we build the understanding of what experiments we'd like to run, that understanding will inform the settings we need, and then the parsing and error-checking.
-In that way we'll ``work backwards'' from our goal (run interesting experiments), and only at the end get into the implementation detail of the driver.
-We'll actually run the experiments in \cref{sec:experiments}.
-
-\subsection{Compute Expected Density of Optimal Bloom Filter}
-As mentioned in our motivating textbook\cite[111]{mitzenmacher2005probability}, an interesting property of an ``optimal'' Bloom filter
-is that its density (the proportion of bits set to $1$) should approach $0.5$.
-This touches on the complicated question of what is ``optimal'', but for our purposes:
-Given a size $N$ collection of strings to hash and desired false-positive rate $\epsilon$, we should be able to determine a ``best'' number-of-bits $m$ and number-of-hashes $k$.
-This optimality will be in part reflected by that density.
-
-So let's enable our driver to compute the density of a Bloom filter!
-Here's the code:
-<<Bloom Filter Optimal Density>>=
-void optimal_density() {
-  std::for_each(included_string_begin, included_string_end,
-                [](auto &s) { bf.set(s); });
-  const double density =
-    static_cast<double>(bf.count()) / static_cast<double>(num_bits_in_filter);
-  printf("%f %zu\n", density, bf.size());
-}
-@
-Each line of code maps to a fairly straightforward idea for our experiment:
-We create a [[num_strings_in_set]]-sized collection of distinct strings, each of length [[length_of_strings]].
-Then with the [[for]] loop we build our Bloom filter, having initialized it with [[num_bits_in_filter]]-many-bits (all starting at 0 of course), and [[num_hash_functions]] hash-functions.
-Having built our Bloom filter, we need ``only'' compare the bits that are set to 1 (via [[count]]) to the total number of bits.
-This would complete our experiment run!
-
-\subsection{Bloom Filter False Positivity}
-This is one experiment!
-<<Bloom Filter False Positive Rate>>=
-void false_positive_rate() {
-  std::for_each(included_string_begin, included_string_end,
-                [](auto &s) { bf.set(s); });
-  auto false_positives = std::count_if(excluded_string_begin, excluded_string_end,
-                                       [](auto &v) { return bf.test(v); });
-  double fp_rate = double(false_positives) / double(num_strings_not_in_set);
-  printf("%f\n", fp_rate);
-}
-@
-
-\subsection{Accelerating A Set}
-We want to time our function.
-We can be a little funny and use C++'s RAII thing.
+\subsection{Measuring Time}
+Bloom filters speed things up in theory.
+Some of our experiments can be to see if that happens in practice.
+There are myriad ways to measure time in C++, here we can have a timer-object that uses constructor and destructor semantics to time how long it takes for the computer to execute a certain scope-of-code.
 <<Timer Object>>=
 class timer_object {
   std::chrono::time_point<std::chrono::steady_clock> start;
@@ -424,84 +298,15 @@ public:
   }
 };
 @
+For those unfamiliar with C++, the idea is that we construct the timer object (via [[timer_object(double*...)]]),
+at which point it saves the the [[start]] time.
+At the end of the scope, the object is automatically destroyed, and that invokes the destructor, [[~timer_object()]],
+which compares the current time with the saved time and writes the difference in the externally-provided [[*elapsed_seconds]].
 
-We need to set up our two sets to compare:
-
-<<Bloom Filter Application>>=
-void bloom_filter_application() {
-  // Initiaize everything.
-  std::for_each(included_string_begin, included_string_end,
-              [](auto &s) {
-                bf.set(s);
-                base_set.insert(s);
-              });
-  double seconds = 0;
-  size_t count = 0;
-  {
-    timer_object t(&seconds);
-    for (auto it = excluded_string_begin; it != excluded_string_end; it++) {
-      if (base_set.find(*it) != base_set.end()) {
-        count++;
-      }
-    }
-  }
-  printf("%f ", seconds);
-  assert(!count);
-
-  seconds = 0;
-  count = 0;
-  {
-    timer_object t(&seconds);
-    for (auto it = excluded_string_begin; it != excluded_string_end; it++) {
-      if (bf.test(*it)) {
-        if (base_set.find(*it) != base_set.end()) {
-          count++;
-        }
-      }
-    }
-  }
-  printf("%f\n", seconds);
-  assert(!count);
-}
-@
-
-The goal of this experiment is to build some confidence that a Bloom filter provides
-a benefit.
-
-\subsection{Driver Plumbing}
-Let's begin to dive into those chunks more explicitly.
-The various settings we need for our experiments are listed out below.
-<<Bloom Filter Settings>>=
-double desired_epsilon = 0.0;
-int num_strings_in_set = 0;
-int num_strings_not_in_set = 0;
-int length_of_strings = 0;
-int rounding_constant = 0;
-  
-bool print_help = false;
-int verbosity_level = 0;
-
-size_t num_hash_functions = 0;
-double num_bits_per_value = 0.0;
-size_t num_bits_in_filter = 0;
-
-bool run_density_experiment = false;
-bool run_false_positive_experiment = false;
-bool run_application_experiment = false;
-@
-These parameters also dictate some values:
-<<Driver State>>=
-bloom_filter<std::string, string_hash> bf;
-std::set<std::string> base_set;
-std::vector<std::string> strings;
-std::vector<std::string>::const_iterator
-  included_string_begin,
-  included_string_end,
-  excluded_string_begin,
-  excluded_string_end;
-@
-
-We set those settings through command-line parsing:
+\subsection{Receive Input Parameters}
+Our program is ultimately going to be called from the command line.
+We implement code to parse a (large!) number of flags that will enable us to run our program with various options.
+We can detail them here:
 <<Read Command-Line Parameters>>=
 int c;
 while ((c = getopt(argc, argv, "dfae:n:x:l:k:b:m:rhv:")) != -1) {
@@ -527,32 +332,14 @@ while ((c = getopt(argc, argv, "dfae:n:x:l:k:b:m:rhv:")) != -1) {
   }
 }
 @
-We want to make sure that we aren't asking for anything silly.
-There are probably more problems we can find, but this helps address simple typos
-<<Error-Check Parameters>>=
-if (!run_density_experiment && !run_false_positive_experiment && !run_application_experiment) {
-  printf("Error: no requested experiment!\n");
-  return 1;
-}
-if (desired_epsilon < 0 || desired_epsilon >= 1) {
-  printf("Error: desired_epsilon must be between 0 and 1, got %f\n", desired_epsilon);
-  return 1;
-}
-if (num_strings_in_set < 0) {
-  printf("Error: num_strings_in_set must be non-negative, got %d\n", num_strings_in_set);
-  return 1;
-}
-if (length_of_strings <= 0) {
-  printf("Error: length_of_strings must be positive, got %d\n", length_of_strings);
-  return 1;
-}
-if (num_bits_per_value < 0) {
-  printf("Error: num_bits_per_value must be positive, got %f\n", num_bits_per_value);
-  return 1;
-}
-@
-And then we have optional parameters
-We prepare experiments by calculating m and k if they're not specified
+The loop is a standard [[getopt]] interface.
+Some flags are just binary: the first three indicate which experiment(s) the user is requesting to run.
+The largest chunk of flags is how the user specifies, e.g., the number of strings to insert into the Bloom filter ([[num_strings_in_set]]), the number of strings to create guaranteed \emph{not} to be in the Bloom filter ([[num_strings_not_in_set]]) and things like the desired $\epsilon$ or the raw size of the Bloom filter.
+Some of these flags are mutually exclusive, and most are ultimately used to construct the Bloom filter.
+
+\subsection{Constructing the Bloom Filter}
+Some of the Bloom filter parameters can be specified from the previous options, and others can be computed from them.
+Here is that logic, intertwined with some more user-friendly options (like debug statements).
 <<Prepare Experiments>>=
 if (verbosity_level != 0) {
   print_driver_state();
@@ -575,11 +362,13 @@ if (verbosity_level >= 1) {
            num_bits_per_value, num_bits_in_filter, num_hash_functions);
 }
 @
+See how things like [[num_hash_functions]], if left uninitialized by the user, are automatically inferred to be the ``optimal'' settings given some other parameters.
+The deriviation of how things are optimal is the subject of the literature that this write-up is complementing.
+(That is to say, I'm not going to write how we determined the formulas for the optimal values.)
 
-
+With these parameters prepared, we can finally compute our test-string-sets and Bloom filter:
 <<Initialize Driver State>>=
 auto total_strings = num_strings_in_set + num_strings_not_in_set;
-// This is assigning globals
 strings = create_strings(total_strings, length_of_strings);
 included_string_begin = std::begin(strings);
 included_string_end = included_string_begin+num_strings_in_set;
@@ -593,57 +382,192 @@ if (verbosity_level > 1) {
     std::distance(excluded_string_begin, excluded_string_end));
 }
 
-// Initialize the bf:
 bf = bloom_filter<std::string, string_hash>(num_bits_in_filter, num_hash_functions);
+// Populate our Bloom filter set and a baseline std::set.
+std::for_each(included_string_begin, included_string_end,
+              [](auto &s) {
+                bf.set(s);
+                base_set.insert(s);
+              });
 @
+These sets are going to be shared between whatever experiments we run.
+So we can isolate out the core \emph{state} of our program: we can move past our command-line parameters and think solely about the objects we'll use for our experiments.
 
-And then finally we run the experiments we choose:
+That state is expressed here:
+<<Driver State>>=
+bloom_filter<std::string, string_hash> bf;
+std::set<std::string> base_set;
+std::vector<std::string> strings;
+std::vector<std::string>::const_iterator
+  included_string_begin,
+  included_string_end,
+  excluded_string_begin,
+  excluded_string_end;
+@
+Note that the four [[const_iterator]]s combine to define two distinct sequences: the first sequence being the strings \emph{in} the Bloom filter, the second sequence being those strings \emph{not} in the Bloom filter.
+These are both subsequences of the vector [[strings]].
+
+\subsection{Defining our Experiments}
+As hinted in \cref{Read Command-Line Parameters} we are going to implement 3 experiments to run with our Bloom filters and sets.
+Their implementations are straightforward; only the application experiment needs helper functions.
 <<Run Selected Experiments>>=
 if (run_density_experiment) {
-  optimal_density();
+  const double density =
+    static_cast<double>(bf.count()) / static_cast<double>(num_bits_in_filter);
+  printf("%f %zu\n", density, bf.size());
 }
 if (run_false_positive_experiment) {
-  if (num_strings_not_in_set <= 0) {
-    printf("Error, for false positive experiment num_strings_not_in_set must be positive, got %d\n",
-           num_strings_not_in_set);
-    return 1;
-  }
-  false_positive_rate();
+  auto false_positives = std::count_if(excluded_string_begin, excluded_string_end,
+                                       [](auto &v) { return bf.test(v); });
+  double fp_rate = double(false_positives) / double(num_strings_not_in_set);
+  printf("%f\n", fp_rate);
 }
 if (run_application_experiment) {
-  if (num_strings_not_in_set <= 0) {
-    printf("Error, for timing experiment num_strings_not_in_set must be positive, got %d\n",
-           num_strings_not_in_set);
-    return 1;
+  double base_seconds = time_baseline();
+  double bloom_seconds = time_bloom_filter();
+  printf("%f %f\n", base_seconds, bloom_seconds);
+}
+@
+Our first experiment simply reports some static properties of the already-initialized Bloom filter.
+The second experiment ``just'' validates the error rate (the $\epsilon$, the false-positive rate) by seeing how many of the guaranteed-not-to-have-been-inserted-in-the-Bloom-filter strings nonetheless are reported as included.
+The third is the most involved: we use that same sequence of guaranteed-not-included strings, and see how much putting a Bloom filter ``in front'' of a normal set speeds things up.
+Those details follow:
+<<Time Baseline>>=
+double time_baseline() {
+  double seconds = 0;
+  size_t count = 0;
+  {
+    timer_object t(&seconds);
+    for (auto it = excluded_string_begin; it != excluded_string_end; it++) {
+      if (base_set.find(*it) != base_set.end()) {
+        count++;
+      }
+    }
   }
-  bloom_filter_application();
+  assert(!count);
+  return seconds;
 }
 @
 
-<<Possible Bloom Filter Experiments>>=
-<<Bloom Filter False Positive Rate>>
-<<Bloom Filter Optimal Density>>
-<<Bloom Filter Application>>
+<<Time Bloom Filter>>=
+double time_bloom_filter() {
+  double seconds = 0;
+  size_t count = 0;
+  {
+    timer_object t(&seconds);
+    for (auto it = excluded_string_begin; it != excluded_string_end; it++) {
+      if (bf.test(*it)) {
+        if (base_set.find(*it) != base_set.end()) {
+          count++;
+        }
+      }
+    }
+  }
+  assert(!count);
+  return seconds;
+}
+@
+I call this ``application'' instead of, say, ``benchmarking'' because (even though of course it really is just a contrived benchmark) the intent is to express \emph{how} Bloom filters are actually used.
+We might consider them alone as an object of study, but the intent is to save time by (sometimes) avoiding an expensive lookup.
+
+\subsection{Tying it all together}
+We have all of our utilities and interfaces.
+Now we just need to put it all in an executable program.
+At a high-level, we describe our driver like so:
+<<driver.cpp>>=
+<<Driver Headers>>
+<<Bloom Filter Settings>>
+<<Driver Utility Functions>>
+<<Driver State>>
+<<Time Baseline>>
+<<Time Bloom Filter>>
+int main(int argc, char* argv[]) {
+  <<Read Command-Line Parameters>>
+  <<Error-Check Parameters>>
+  <<Prepare Experiments>>
+  <<Initialize Driver State>>
+  <<Run Selected Experiments>>
+}
+@
+The complete listing can be found in \cref{sec:driver-complete}.
+Some of the chunks (like the headers, error-checking code, printing out the ``help'' instructions, and so on) are not included in the text
+and just appear in the listing.
+The exposition here is hopefully enough to describe how this driver works at a high level, and the complete code is included to keep things unambiguous.
+
+Now let's write scripts to exercise our CLI program in various ways to finally learn more about Bloom filters in practice.
+
+
+<<Bloom Filter Settings>>=
+% HIDDEN
+double desired_epsilon = 0.0;
+int num_strings_in_set = 0;
+int num_strings_not_in_set = 0;
+int length_of_strings = 0;
+int rounding_constant = 0;
+  
+bool print_help = false;
+int verbosity_level = 0;
+
+size_t num_hash_functions = 0;
+double num_bits_per_value = 0.0;
+size_t num_bits_in_filter = 0;
+
+bool run_density_experiment = false;
+bool run_false_positive_experiment = false;
+bool run_application_experiment = false;
+@
+
+<<Error-Check Parameters>>=
+% HIDDEN
+if (!run_density_experiment && !run_false_positive_experiment && !run_application_experiment) {
+  printf("Error: no requested experiment!\n");
+  return 1;
+}
+if (desired_epsilon < 0 || desired_epsilon >= 1) {
+  printf("Error: desired_epsilon must be between 0 and 1, got %f\n", desired_epsilon);
+  return 1;
+}
+if (num_strings_in_set < 0) {
+  printf("Error: num_strings_in_set must be non-negative, got %d\n", num_strings_in_set);
+  return 1;
+}
+if (length_of_strings <= 0) {
+  printf("Error: length_of_strings must be positive, got %d\n", length_of_strings);
+  return 1;
+}
+if (num_bits_per_value < 0) {
+  printf("Error: num_bits_per_value must be positive, got %f\n", num_bits_per_value);
+  return 1;
+}
+if (run_false_positive_experiment || run_application_experiment) {
+  if (num_strings_not_in_set <= 0) {
+    printf("Error, for these experiments num_strings_not_in_set must be positive, got %d\n",
+           num_strings_not_in_set);
+    return 1;
+  }
+}
 @
 
 <<Driver Utility Functions>>=
+% HIDDEN
+<<Create Strings>>
 <<Hashing Function>>
 <<Print Driver Parameters>>
 <<Timer Object>>
 @
 
 <<Driver Headers>>=
+% HIDDEN
 #include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <unordered_set>
 #include <set>
 #include <string>
 #include <unistd.h>
-
-#include <iostream>
 
 #include "bloomfilter.h"
 #include "datagen.h"
@@ -651,6 +575,7 @@ if (run_application_experiment) {
 @
 
 <<Print Driver Parameters>>=
+% HIDDEN
 void print_driver_state() {
   printf("parameters:\n"
     "\tprint_help=%s\n"
@@ -671,26 +596,24 @@ void print_driver_state() {
 }
 @
 
-At this point, we have our analytical results, our Bloom filter implementation,
-and a means to exercise that Bloom filter.
-Let's get some empirical results!
+We have our complete program: we're now ready to get some empirical results!
 
 \section{Experiments}\label{sec:experiments}
-We will explore whether our driver successfully confirms theoretical results.
+We now explore whether our driver successfully confirms theoretical results.
 
 \subsection{Optimal Bit-Density}
-One initial theoretical result \cite{TOCITE} points out that any optimal Bloom filter should have a bit-density
-(that is, the proportion of bits set to 1) very close to $0.5$.
+As mentioned in our motivating textbook\cite[111]{mitzenmacher2005probability}, an interesting property of an ``optimal'' Bloom filter is that its density (the proportion of bits set to $1$) should approach $0.5$.
+This touches on the complicated question of what is ``optimal'', but for our purposes:
+Given a size $N$ collection of strings to hash and desired false-positive rate $\epsilon$, we should be able to determine a ``best'' number-of-bits $m$ and number-of-hashes $k$.
 
 Can we validate this manifesting in our code, empirically? Yes.
 We might want a chart to show that, no matter the specified $\epsilon$, number of input strings, or length of strings,
-our default hash-function-count and Bloom-filter-size will yield the desired $\epsilon$ and have density very close.
+our default hash-function-count and Bloom-filter-size will yield the desired $\epsilon$ and have density very close to $0.5$.
+(We're not going to be exhaustive here: this document is to illustrate that theoretical properties can be
+empirically observed, not a full validation of our Bloom filter implementation.)
 
-We're not going to be exhaustive here: this document is to \emph{demonstrate} that theoretical properties can be
-empirically observed, not a full validation of our Bloom filter implementation.
-
-So let's make an interesting graph: let's vary $\epsilon$, and chart how density \emph{and} filter-size varies.
-
+So let's make an interesting graph: let's vary $\epsilon$, and chart how density varies.
+Here we have a terse script that runs this experiments and plots the result:
 <<plot-density.sh>>=
 #!/bin/bash
 e=0.8
@@ -708,15 +631,20 @@ done | gnuplot -e "
   set output '$output';
   plot '-' using 1:2 with linespoints notitle"
 @
-
-And this generates the interesting plot we have here:
+The desired epsilon ([[e]]) starts at $0.8$, and on each iteration ([[e=$(echo "$e / 2" | bc -l)]]) halves it: so we're running our experiment with $\epsilon\in\{0.8,0.4,0.2,0.1,0.05\ldots\}$.
+(Note that the X-axis may seem sort of ``backwards'': the bottom-left is showing that with very-low $\epsilon$, i.e., a ``better'' Bloom filter, whereas ones intuition may suggest our chart starts with a ``worse'' Bloom filter on the left.)
 \begin{figure}[ht]
     \centering
     \input{plot-density.fig.tex}
-    \caption{Density by Hash Function Count}
+    \caption{Density by Desired Epsilon}
     \label{fig:plot_density}
 \end{figure}
+The result in \cref{fig:plot_density} confirms that, as we request smaller and smaller $\epsilon$, the resulting bit-density approaches $0.5$.
+It doesn't quite approach $0.5$ due to rounding.
 
+Intuition---and our code in \cref{Prepare Experiments}---suggests that closer our density gets to $0.5$, the more bits we need to dedicate to each value in the Bloom filter.
+(Note that, however, the number of bits dedicated to each value is wholly a function of $\epsilon$ and the total number of strings---\emph{not} the size of the strings. That's neat!)
+We can confirm that with a very similar experiment: we have the exact same script as before, but instead read the next column in the output (that says the size of the Bloom filter).
 <<plot-size.sh>>=
 #!/bin/bash
 e=0.8
@@ -734,16 +662,18 @@ done | gnuplot -e "
   set output '$output';
   plot '-' using 1:3 with linespoints notitle"
 @
-
-And this generates the interesting plot we have here:
+The (log-scale, again) result in \cref{fig:plot_size} clearly confirms that our Bloom filter gets bigger the closer $\epsilon$ gets to $0$.
 \begin{figure}[ht]
     \centering
     \input{plot-size.fig.tex}
-    \caption{Density by Hash Function Count}
+    \caption{Bloom Filter Size by Desired Epsilon}
     \label{fig:plot_size}
 \end{figure}
 
-This invites us to consider how much it matters to have the ``wrong'' number of hash functions.
+In our prior experiments we've let the driver compute, given the $\epsilon$, the ``optimal'' number of hash functions.
+This invites an empirical question: how bad is it to get that wrong?
+In other words, how far off does our density vary from $0.5$ if we have a typo somewhere leading to the wrong hash-function count?
+We compute this as follows:
 <<plot-density-per-hash.sh>>=
 #!/bin/bash
 output="$(basename "$0" .sh).fig.tex"
@@ -758,8 +688,8 @@ done | gnuplot -e "
   set output '$output';
   plot '-' using 1:2 with linespoints notitle"
 @
-
-And this generates the interesting plot we have here:
+The resulting plot shows that you can be slightly off with $k$ before it's ``obviously'' wrong.
+That's interesting, and an empirical result that seems hard (to me, at least) to derive analytically.
 \begin{figure}[ht]
     \centering
     \input{plot-density-per-hash.fig.tex}
@@ -767,104 +697,11 @@ And this generates the interesting plot we have here:
     \label{fig:density_by_hash_function_count}
 \end{figure}
 
-
-\subsection{Specifying Epsilon}
-Explore how number-of-bits needed for set-size relates to hash function
-
-
-\subsection{Measuring Set Acceleration}
-Does the total resident memory matter?
-<<acceleration-by-count.sh>>=
-#!/bin/bash
-output="$(basename "$0" .sh).fig.tex"
-tmpfile=$(mktemp)
-for hash_count in {1..10}; do
-  count="$hash_count"00000 
-  result=$(./driver -a -e 0.01 -n 1000000 -x $count -l 24)
-  echo "$count $result"
-done > $tmpfile
-
-gnuplot -e "
-  set terminal tikz size 5in,2.4in;
-  set xlabel 'Number of Excluded Values';
-  set format x '$%.0t \cdot 10^{%T}$';
-  set ylabel 'Time (Seconds)';
-  set output '$output';
-  plot '$tmpfile' using 1:2 with linespoints title 'Without BF',
-       '$tmpfile' using 1:3 with linespoints title 'With BF'"
-
-rm $tmpfile
-@
-
-\begin{figure}[ht]
-    \centering
-    \input{acceleration-by-count.fig.tex}
-    \caption{Comparing Empirical to Theoretical $\epsilon$}
-    \label{fig:acceleration_by_count}
-\end{figure}
-
-<<acceleration-by-count-big.sh>>=
-#!/bin/bash
-output="$(basename "$0" .sh).fig.tex"
-tmpfile=$(mktemp)
-for hash_count in {1..10}; do
-  count="$hash_count"00000 
-  result=$(./driver -a -e 0.01 -n 1000000 -x $count -l 240)
-  echo "$count $result"
-done > $tmpfile
-
-gnuplot -e "
-  set terminal tikz size 5in,2.4in;
-  set xlabel 'Number of Excluded Values';
-  set format x '$%.0t \cdot 10^{%T}$';
-  set ylabel 'Time (Seconds)';
-  set output '$output';
-  plot '$tmpfile' using 1:2 with linespoints title 'Without BF',
-       '$tmpfile' using 1:3 with linespoints title 'With BF'"
-
-rm $tmpfile
-@
-
-\begin{figure}[ht]
-    \centering
-    \input{acceleration-by-count-big.fig.tex}
-    \caption{Comparing Empirical to Theoretical $\epsilon$}
-    \label{fig:acceleration_by_count_big}
-\end{figure}
-
-<<acceleration-by-precision.sh>>=
-#!/bin/bash
-output="$(basename "$0" .sh).fig.tex"
-e=0.1
-for i in {1..10}; do
-  result=$(./driver -a -e $e -n 1000000 -x 1000000 -l 240)
-  e=$(echo "$e / 2" | bc -l)
-  echo "$e $result"
-done | gnuplot -e "
-  set terminal tikz size 5in,2.4in;
-  set xlabel 'Bloom Filter Precison';
-  set format x '$%.0t \cdot 10^{%T}$';
-  set ylabel 'Time (Seconds)';
-  set output '$output';
-  plot '-' using 1:3 with linespoints title 'With BF'"
-@
-
-\begin{figure}[ht]
-    \centering
-    \input{acceleration-by-precision.fig.tex}
-    \caption{Runtime Variation by Epsilon}
-    \label{fig:acceleration_by_precisin}
-\end{figure}
-
-
-
 \subsection{False Positive Rate}
-To what degree does our code empirically match the expected false-positive rate?
+We've confirmed density.
+Now, quickly: to what degree does our code empirically match the expected false-positive rate?
 Basically, when we specify an epsilon, do we get that epsilon?
-
-This prompts another interesting question: how do we measure its variance?
-I don't rightly know.
-
+We can validate this with our other experiment run in our driver:
 <<validate-epsilon-empirically.sh>>=
 #!/bin/bash
 output="$(basename "$0" .sh).fig.tex"
@@ -893,6 +730,7 @@ gnuplot -e "
 rm $tmpfile
 @
 
+We can see that it seems to track very precisely in \cref{fig:measure_epsilon}, so that's reassuring.
 \begin{figure}[ht]
     \centering
     \input{validate-epsilon-empirically.fig.tex}
@@ -905,6 +743,129 @@ the false positive rate was always (at first) exactly $1.0$.
 Even for $\epsilon=0.51$ or similar.
 In debugging I found that this is because we'd always round down.
 
+The static properties of our Bloom filter seem to match our theoretical expectations.
+Now: do we get the runtime improvements we expect?
+
+\subsection{Measuring Set Speedup}
+We've explored and confirmed some of the static properties of our Bloom filter.
+Now let's explore the whole motivation: how much does putting a Bloom filter in front of a (slow) [[std::set]] help?
+In the following experiment we fix our Bloom filter to have an $\epsilon=0.01$, request one million strings be in the set, and vary the excluded strings from $100,000$ to one million.
+We run our timing (``application'') experiment, see \cref{Run Selected Experiments} on these parameters and plot how the speedup scales.
+<<acceleration-by-count.sh>>=
+#!/bin/bash
+output="$(basename "$0" .sh).fig.tex"
+tmpfile=$(mktemp)
+for miss_count in {1..10}; do
+  count="$miss_count"00000 
+  result=$(./driver -a -e 0.01 -n 1000000 -x $count -l 24)
+  echo "$count $result"
+done > $tmpfile
+
+gnuplot -e "
+  set terminal tikz size 5in,2.4in;
+  set xlabel 'Number of Excluded Values';
+  set format x '$%.0t \cdot 10^{%T}$';
+  set ylabel 'Time (Seconds)';
+  set output '$output';
+  plot '$tmpfile' using 1:2 with linespoints title 'Without BF',
+       '$tmpfile' using 1:3 with linespoints title 'With BF'"
+
+rm $tmpfile
+@
+As we can see in the results in \cref{fig:acceleration_by_count} we get a \emph{real} win with Bloom filters.
+In reality we should also profile the resulting programs and confirm that the execution really changes in the way we expect.
+I've seen silly things like one-half of the experiment accidentally allocate everything twice.
+Profiling serves the purpose of getting the real ``root cause'' of the performance change.
+For this exposition, however, let's just take it on faith.
+Sequel work can give instrumented assembly.
+\begin{figure}[ht]
+    \centering
+    \input{acceleration-by-count.fig.tex}
+    \caption{Comparing Speedup With Bloom Filters}
+    \label{fig:acceleration_by_count}
+\end{figure}
+
+We may still be curious in one more variation: recall the Bloom filters interestingly \emph{don't} take up more room based on the size of each \emph{element} (only the count of elements).
+Would this be reflected in much-larger strings, so that the [[std::set]] has to do even more, worse, string comparisons?
+The following is the same experiment as before, but note [[-l 240]]: our input strings are getting pretty big.
+<<acceleration-by-count-big.sh>>=
+#!/bin/bash
+output="$(basename "$0" .sh).fig.tex"
+tmpfile=$(mktemp)
+for miss_count in {1..10}; do
+  count="$miss_count"00000 
+  result=$(./driver -a -e 0.01 -n 1000000 -x $count -l 240)
+  echo "$count $result"
+done > $tmpfile
+
+gnuplot -e "
+  set terminal tikz size 5in,2.4in;
+  set xlabel 'Number of Excluded Values';
+  set format x '$%.0t \cdot 10^{%T}$';
+  set ylabel 'Time (Seconds)';
+  set output '$output';
+  plot '$tmpfile' using 1:2 with linespoints title 'Without BF',
+       '$tmpfile' using 1:3 with linespoints title 'With BF'"
+
+rm $tmpfile
+@
+
+Surprisingly, \emph{the Bloom filter} slows down in \cref{fig:acceleration_by_count_big}!
+Or at least, the wins are smaller.
+While contrary (at least superficially) to our theoretical understanding, some ad-hoc profiling I did suggests we're spending a lot of time hashing the strings to compute the Bloom filter bits.
+I think there's a lot more insight to mine here, but again for brevity we'll leave more analysis for another exposition.
+\begin{figure}[ht]
+    \centering
+    \input{acceleration-by-count-big.fig.tex}
+    \caption{Comparing Speedup with Bloom Filters on Big Strings}
+    \label{fig:acceleration_by_count_big}
+\end{figure}
+
+We've previously committed to $\epsilon=0.01$. Maybe that's too much.
+Focusing just on the Bloom filter case now, how much speedup do we get from $\epsilon=0.01$ versus $\epsilon=0.1$?
+We'll not look at those exact numbers, but here is such an experiment:
+<<acceleration-by-precision.sh>>=
+#!/bin/bash
+output="$(basename "$0" .sh).fig.tex"
+e=0.8
+for i in {1..8}; do
+  result=$(./driver -a -e $e -n 1000000 -x 1000000 -l 24)
+  e=$(echo "$e / 2" | bc -l)
+  echo "$e $result"
+done | gnuplot -e "
+  set terminal tikz size 5in,2.4in;
+  set xlabel 'Specified $\epsilon$';
+  set xrange [*:1];
+  set logscale x;
+  set ylabel 'Time (Seconds)';
+  set output '$output';
+  plot '-' using 1:3 with linespoints title 'With BF'"
+@
+
+The results in \cref{fig:acceleration_by_precision} suggests it's worth cranking up the $\epsilon$ to a pretty low number.
+\begin{figure}[ht]
+    \centering
+    \input{acceleration-by-precision.fig.tex}
+    \caption{Runtime Variation by Epsilon}
+    \label{fig:acceleration_by_precision}
+\end{figure}
+
+\section{Parting Thoughts}
+Each experiment I ran lead to more thoughts on \emph{other} interesting experiments to run.
+That's fun and exciting!
+Bloom filters are really amenable to implementation and experimenation.
+I wonder if we can get to such a point for other, more sophisticated theoretical objects like those used in SAT solvers.
+The ``wins'' in Bloom filters partly come from using uniform random numbers (hashing), and so to a sense it's workload-agnostic: we only have a few dimensions of the input to consider (and the moment we consider another dimension, e.g., input-string-length, we do start getting unintuitive results).
+SAT solvers, compilation algorithms, and other ``big'' things seem much more sensitive to workloads.
+Just something I'm ruminating on.
+
+I think literate code, at best, comes at the very, very end.
+Trying to write this code ``notebook-style'' just didn't work for me.
+
+While the empiricism in this write-up was fun and I think a valuable (uncommon) contribution, it was not as obviously-educational as I would have guessed.
+I think for a student this hopefully demonstrates some new ways of thinking about programming in-the-small (a discrete boundary between our library and our driver-program, things like [[getopt]]), and that it's \emph{possible} to place theoretical results in practice.
+I would be curious if a students walks away feeling empowered to play with other theoretical objects in code.
+Maybe C++ was the wrong choice; I thought it'd help with, e.g., profiling.
 
 \appendix
 \section{Library Code Listings}
@@ -912,16 +873,11 @@ In debugging I found that this is because we'd always round down.
 \inputminted[fontsize=\small,linenos=true]{c++}{bloomfilter.h}
 \subsection{Simple Bit Set (simplebitset.h)}\label{simplebitsetlisting}
 \inputminted[fontsize=\small,linenos=true]{c++}{simplebitset.h}
-\section{Driver Code Listings}
-\subsection{Main Driver}
+\section{Driver Code Listings}\label{sec:driver-complete}
 \inputminted[fontsize=\small,linenos=true]{c++}{driver.cpp}
-\subsection{Generating Data}
-\paragraph{datagen.h}
-\inputminted[fontsize=\small,linenos=true]{c++}{datagen.h}
-\paragraph{datagen.cpp}
-\inputminted[fontsize=\small,linenos=true]{c++}{datagen.cpp}
 \end{document}
 
 % Original paper:
 % https://dl.acm.org/doi/10.1145/362686.362692
 % https://dl.acm.org/doi/pdf/10.1145/362686.362692
+

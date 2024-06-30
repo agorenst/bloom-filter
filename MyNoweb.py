@@ -155,7 +155,7 @@ def CodeChunkToFigChunk(chunk):
             targetLang = line.split()[1]
             newChunk.append('@nl\n')
             newChunk.append(
-                '@text \\begin{figure}\n@nl\n@text \\begin{minted}[fontsize=\\footnotesize,frame=lines,mathescape]{'+targetLang+'}\n')
+                '@text \\begin{figure}[H]\n@nl\n@text \\begin{minted}[fontsize=\\footnotesize,frame=lines,mathescape]{'+targetLang+'}\n')
             continue
         if line.split()[:1] == ['@defn']:
             #newChunk.append('@text // '+line)

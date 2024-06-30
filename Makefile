@@ -7,6 +7,8 @@ files=$(shell for r in `noroots bloomfilter.nw | grep -v " "`; do echo $${r:2:-2
 figure_scripts=$(filter %.sh, $(files))
 figures=$(figure_scripts:.sh=.fig.tex)
 
+# string_generator:
+
 bloomfilter.pdf : bloomfilter.tex library.bib $(files) $(figures)
 		latexmk -pdf -shell-escape $(basename $<)
 
@@ -14,14 +16,14 @@ files: $(files)
 $(files): % : bloomfilter.nw
 	notangle -R$* $^ | sed -e '/% HIDDEN/d' | cpif $@
 
-deps=datagen.o murmur/MurmurHash3.o
+deps=murmur/MurmurHash3.o
 
 driver: $(deps)
 
 bloomfilter.tex : bloomfilter.nw
 		./myweave.sh $< > $@
 
-datagen:
+# datagen:
 
 %.fig.tex: %.sh driver
 	chmod u+x $<
